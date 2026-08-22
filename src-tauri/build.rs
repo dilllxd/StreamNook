@@ -18,6 +18,8 @@ fn main() {
         // without them still compiles (Kick connect just reports "not configured").
         "KICK_APP_CLIENT_ID",
         "KICK_APP_CLIENT_SECRET",
+        // itzon desktop OAuth is a public PKCE client and has no client secret.
+        "ITZON_OAUTH_CLIENT_ID",
     ];
 
     // Try loading from project root .env file

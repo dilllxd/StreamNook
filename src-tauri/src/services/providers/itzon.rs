@@ -323,13 +323,14 @@ async fn connect_and_stream(
     )
     .await
     .context("itzon chat configuration timed out")??;
-    let cookie = crate::services::itzon_auth_service::chat_cookie_header();
+    let auth = crate::services::itzon_auth_service::chat_auth().await;
+    let has_auth = auth.pass.is_some() || auth.cookie_header.is_some();
     let auth_revision = crate::services::itzon_auth_service::revision();
     let mut request = url.as_str().into_client_request()?;
     request
         .headers_mut()
         .insert(header::ORIGIN, HeaderValue::from_static("https://itzon.tv"));
-    if let Some(cookie) = cookie.as_deref() {
+    if let Some(cookie) = auth.cookie_header.as_deref() {
         request
             .headers_mut()
             .insert(header::COOKIE, HeaderValue::from_str(cookie)?);
@@ -342,14 +343,22 @@ async fn connect_and_stream(
     .context("itzon chat connection timed out")??;
     let (mut write, mut read) = ws.split();
     let random = Uuid::new_v4().simple().to_string();
-    let nick = format!("guest_{}", &random[..8]);
+    let nick = auth
+        .nick
+        .unwrap_or_else(|| format!("guest_{}", &random[..8]));
 
-    for line in [
+    let mut registration = Vec::new();
+    if let Some(pass) = auth.pass {
+        // Itzon requires PASS to be the first IRC command for OAuth clients.
+        registration.push(format!("PASS {pass}"));
+    }
+    registration.extend([
         "CAP REQ :message-tags echo-message draft/message-redaction".to_string(),
         "CAP REQ :server-time".to_string(),
         format!("NICK {nick}"),
         format!("USER {nick} 0 * :{nick}"),
-    ] {
+    ]);
+    for line in registration {
         write.send(Message::text(format!("{line}\r\n"))).await?;
     }
 
@@ -396,7 +405,7 @@ async fn connect_and_stream(
                 let Some(outgoing_message) = outgoing_message else {
                     return Ok(());
                 };
-                if cookie.is_none() || !crate::services::itzon_auth_service::is_connected() {
+                if !has_auth || !crate::services::itzon_auth_service::is_connected() {
                     let _ = outgoing_message.response.send(SendOutcome {
                         message_id: None,
                         is_sent: false,
@@ -488,7 +497,7 @@ async fn connect_and_stream(
                                     &send_state,
                                     joined,
                                     &confirmed_nick,
-                                    cookie.is_some(),
+                                    has_auth,
                                     verified,
                                     banned,
                                 );
@@ -510,7 +519,7 @@ async fn connect_and_stream(
                                         &send_state,
                                         joined,
                                         &confirmed_nick,
-                                        cookie.is_some(),
+                                        has_auth,
                                         verified,
                                         banned,
                                     );
@@ -529,7 +538,7 @@ async fn connect_and_stream(
                                     &send_state,
                                     joined,
                                     &confirmed_nick,
-                                    cookie.is_some(),
+                                    has_auth,
                                     verified,
                                     banned,
                                 );
@@ -563,7 +572,7 @@ async fn connect_and_stream(
                                 &send_state,
                                 joined,
                                 &confirmed_nick,
-                                cookie.is_some(),
+                                has_auth,
                                 verified,
                                 banned,
                             );
@@ -643,7 +652,7 @@ fn update_send_state(
     send_state: &AtomicU8,
     joined: bool,
     confirmed_nick: &str,
-    has_cookie: bool,
+    has_auth: bool,
     verified: Option<bool>,
     banned: bool,
 ) {
@@ -652,7 +661,7 @@ fn update_send_state(
     } else if joined && verified == Some(false) {
         SEND_UNVERIFIED
     } else if joined
-        && has_cookie
+        && has_auth
         && verified == Some(true)
         && !confirmed_nick.to_ascii_lowercase().starts_with("guest_")
     {
@@ -1219,7 +1228,7 @@ mod tests {
     }
 
     #[test]
-    fn itzon_channel_send_state_requires_account_join_cookie_and_verification() {
+    fn itzon_channel_send_state_requires_account_join_auth_and_verification() {
         let state = AtomicU8::new(SEND_CONNECTING);
 
         update_send_state(&state, true, "guest_deadbeef", true, Some(true), false);

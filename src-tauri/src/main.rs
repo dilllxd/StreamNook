@@ -888,6 +888,7 @@ fn main() {
             itzon_is_connected,
             itzon_restore_session,
             itzon_account_name,
+            itzon_auth_method,
             youtube_disconnect,
             youtube_is_connected,
             youtube_account_name,

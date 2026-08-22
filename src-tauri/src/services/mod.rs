@@ -26,6 +26,7 @@ pub mod http;
 pub mod irc_service;
 pub mod itzon_auth_service;
 pub mod itzon_media;
+pub mod itzon_oauth_service;
 pub mod kick_auth_service;
 pub mod layout_service;
 pub mod live_notification_service;

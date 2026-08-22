@@ -14,6 +14,7 @@ import { useAppStore } from '../../stores/AppStore';
 import { Logger } from '../../utils/logger';
 
 type Status = 'native' | 'connected' | 'disconnected' | 'soon';
+type ItzonAuthMethod = 'oauth' | 'website-session' | 'oauth-ready' | 'registration-pending';
 
 const DOT: Record<Status, string> = {
   native: '#53fc18',
@@ -40,6 +41,7 @@ export default function ConnectionsSettings() {
   const [itzonConnected, setItzonConnected] = useState(false);
   const [itzonName, setItzonName] = useState<string | null>(null);
   const [itzonBusy, setItzonBusy] = useState(false);
+  const [itzonAuthMethod, setItzonAuthMethod] = useState<ItzonAuthMethod>('registration-pending');
 
   useEffect(() => {
     let active = true;
@@ -49,6 +51,7 @@ export default function ConnectionsSettings() {
         if (!active) return;
         setItzonConnected(connected);
         setItzonName(connected ? await invoke<string | null>('itzon_account_name') : null);
+        setItzonAuthMethod(await invoke<ItzonAuthMethod>('itzon_auth_method'));
       } catch {
         /* ignore */
       }
@@ -101,6 +104,7 @@ export default function ConnectionsSettings() {
       .then(async () => {
         setItzonConnected(true);
         setItzonName(await invoke<string | null>('itzon_account_name'));
+        setItzonAuthMethod(await invoke<ItzonAuthMethod>('itzon_auth_method'));
       })
       .catch((error) => Logger.warn('[itzon] connect failed:', error))
       .finally(() => setItzonBusy(false));
@@ -108,9 +112,10 @@ export default function ConnectionsSettings() {
 
   const disconnectItzon = useCallback(() => {
     void invoke('itzon_disconnect')
-      .then(() => {
+      .then(async () => {
         setItzonConnected(false);
         setItzonName(null);
+        setItzonAuthMethod(await invoke<ItzonAuthMethod>('itzon_auth_method'));
       })
       .catch(() => {});
   }, []);
@@ -152,7 +157,14 @@ export default function ConnectionsSettings() {
       return kickName ? `Connected as ${kickName}` : 'Connected';
     }
     if (p === 'itzon' && status === 'connected') {
-      return itzonName ? `Connected as ${itzonName}` : 'Connected';
+      const method = itzonAuthMethod === 'oauth' ? 'OAuth' : 'compatibility session';
+      return `${itzonName ? `Connected as ${itzonName}` : 'Connected'} · ${method}`;
+    }
+    if (p === 'itzon' && itzonAuthMethod === 'oauth-ready') {
+      return 'OAuth ready · not connected';
+    }
+    if (p === 'itzon' && itzonAuthMethod === 'registration-pending') {
+      return 'Compatibility login · OAuth registration pending';
     }
     if (p === 'youtube' && status === 'connected') {
       return youtubeName ? `Connected as ${youtubeName}` : 'Connected';

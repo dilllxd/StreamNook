@@ -1,11 +1,8 @@
-//! Consent-driven itzon web-session authentication.
+//! Itzon account authentication.
 //!
-//! The user signs in on itzon's own page inside a dedicated WebView2 profile.
-//! StreamNook never sees a password. Once `/auth/session` confirms the account,
-//! only the cookies applicable to itzon and its chat edge are copied into memory
-//! for the native IRC-over-WebSocket connection. The WebView2 profile persists
-//! the site's session using the platform's browser storage; StreamNook does not
-//! write a second token/cookie file.
+//! Registered builds use the documented public-client OAuth PKCE flow. Until the
+//! fork has its own client ID, the existing site-owned WebView session remains a
+//! compatibility fallback for chat sending and the website-only following API.
 
 use crate::services::twitch_service::get_app_data_dir;
 use anyhow::{anyhow, Context, Result};
@@ -32,6 +29,12 @@ struct ItzonSession {
     username: String,
     token: String,
     validated_at: Instant,
+}
+
+pub struct ChatAuth {
+    pub cookie_header: Option<String>,
+    pub pass: Option<String>,
+    pub nick: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -76,18 +79,72 @@ fn bump_revision() {
     REVISION.fetch_add(1, Ordering::SeqCst);
 }
 
-pub fn is_connected() -> bool {
-    session_cell()
+pub(crate) fn oauth_changed() {
+    bump_revision();
+}
+
+pub fn oauth_configured() -> bool {
+    crate::services::itzon_oauth_service::is_configured()
+}
+
+pub fn auth_method() -> &'static str {
+    if crate::services::itzon_oauth_service::has_account() {
+        "oauth"
+    } else if session_cell()
         .lock()
         .map(|session| session.is_some())
         .unwrap_or(false)
+    {
+        "website-session"
+    } else if oauth_configured() {
+        "oauth-ready"
+    } else {
+        "registration-pending"
+    }
+}
+
+pub fn is_connected() -> bool {
+    crate::services::itzon_oauth_service::has_account()
+        || session_cell()
+            .lock()
+            .map(|session| session.is_some())
+            .unwrap_or(false)
 }
 
 pub fn account_name() -> Option<String> {
+    if let Some(username) = crate::services::itzon_oauth_service::account_name() {
+        return Some(username);
+    }
     session_cell()
         .lock()
         .ok()
         .and_then(|session| session.as_ref().map(|session| session.username.clone()))
+}
+
+pub async fn chat_auth() -> ChatAuth {
+    match crate::services::itzon_oauth_service::chat_credential().await {
+        Ok(Some(credential)) => {
+            return ChatAuth {
+                cookie_header: None,
+                pass: Some(credential.access_token),
+                nick: Some(credential.username),
+            };
+        }
+        Ok(None) => {}
+        Err(error) => log::warn!("[itzon] OAuth credential unavailable: {error}"),
+    }
+    if ensure_cookie_valid().await {
+        return ChatAuth {
+            cookie_header: chat_cookie_header(),
+            pass: None,
+            nick: None,
+        };
+    }
+    ChatAuth {
+        cookie_header: None,
+        pass: None,
+        nick: None,
+    }
 }
 
 pub fn chat_cookie_header() -> Option<String> {
@@ -103,6 +160,15 @@ pub fn chat_cookie_header() -> Option<String> {
 }
 
 pub async fn ensure_valid() -> bool {
+    match crate::services::itzon_oauth_service::chat_credential().await {
+        Ok(Some(_)) => return true,
+        Ok(None) => {}
+        Err(error) => log::warn!("[itzon] OAuth validation failed: {error}"),
+    }
+    ensure_cookie_valid().await
+}
+
+async fn ensure_cookie_valid() -> bool {
     let snapshot_revision = revision();
     let snapshot = session_cell()
         .lock()
@@ -149,10 +215,14 @@ pub async fn ensure_valid() -> bool {
 }
 
 pub async fn followed_usernames() -> Result<Vec<String>> {
-    if !is_connected() && !restore().await {
+    let has_cookie_session = session_cell()
+        .lock()
+        .map(|session| session.is_some())
+        .unwrap_or(false);
+    if !has_cookie_session && !restore_cookie().await {
         return Ok(Vec::new());
     }
-    if !ensure_valid().await {
+    if !ensure_cookie_valid().await {
         return Ok(Vec::new());
     }
 
@@ -318,8 +388,25 @@ fn merge_response_cookies(
     delta
 }
 
-#[cfg(windows)]
 pub async fn connect() -> Result<()> {
+    if oauth_configured() {
+        crate::services::itzon_oauth_service::connect().await
+    } else {
+        connect_cookie().await
+    }
+}
+
+pub async fn restore() -> bool {
+    crate::services::itzon_oauth_service::restore().await || restore_cookie().await
+}
+
+pub async fn disconnect() {
+    crate::services::itzon_oauth_service::disconnect();
+    disconnect_cookie().await;
+}
+
+#[cfg(windows)]
+async fn connect_cookie() -> Result<()> {
     use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
     let app = crate::services::providers::app_handle()
@@ -386,7 +473,7 @@ pub async fn connect() -> Result<()> {
 /// The profile already persists itzon's cookies; this only validates and copies
 /// the cookies needed by the native chat socket after an app restart.
 #[cfg(windows)]
-pub async fn restore() -> bool {
+async fn restore_cookie() -> bool {
     use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
     let _restore_guard = RESTORE_LOCK
@@ -476,12 +563,15 @@ pub async fn restore() -> bool {
 }
 
 #[cfg(not(windows))]
-pub async fn restore() -> bool {
-    is_connected()
+async fn restore_cookie() -> bool {
+    session_cell()
+        .lock()
+        .map(|session| session.is_some())
+        .unwrap_or(false)
 }
 
 #[cfg(not(windows))]
-pub async fn connect() -> Result<()> {
+async fn connect_cookie() -> Result<()> {
     Err(anyhow!(
         "itzon web-session login is currently implemented on Windows"
     ))
@@ -512,7 +602,7 @@ async fn resolve_chat_cookie_url() -> Result<url::Url> {
     Ok(url)
 }
 
-pub async fn disconnect() {
+async fn disconnect_cookie() {
     let session = session_cell().lock().ok().and_then(|mut session| {
         let removed = session.take();
         if removed.is_some() {

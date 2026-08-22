@@ -341,6 +341,11 @@ pub fn itzon_account_name() -> Option<String> {
     crate::services::itzon_auth_service::account_name()
 }
 
+#[tauri::command]
+pub fn itzon_auth_method() -> String {
+    crate::services::itzon_auth_service::auth_method().to_string()
+}
+
 /// itzon's global and channel-specific 7TV set for chat rendering, picker, and
 /// tab completion. The channel's Twitch identity is resolved from itzon itself.
 #[tauri::command]

@@ -41,6 +41,8 @@ $env:TWITCH_APP_CLIENT_ID='<local value>'
 $env:TWITCH_APP_CLIENT_SECRET='<local value>'
 $env:TWITCH_WEB_CLIENT_ID='<local value>'
 $env:TWITCH_ANDROID_CLIENT_ID='<local value>'
+# Optional until itzon registers this fork's public OAuth application:
+$env:ITZON_OAUTH_CLIENT_ID='<32-hex public client id>'
 npm run tauri dev
 ```
 
@@ -129,35 +131,32 @@ itzon account in Settings > Connections.
 
 ## Authentication and local security model
 
-- Login opens only from an explicit Connect action. Authentication stays inside
-  itzon's own page and WebView2 profile; StreamNook does not automate or inspect
-  credential entry.
-- Copied session cookies are process-memory only. They are not written to a
-  StreamNook token file or keyring. The dedicated WebView2 profile may persist
-  itzon's own browser storage so the website can restore its session locally.
-- Disconnect performs a best-effort website logout, clears the in-memory
-  session, and removes that dedicated itzon browser profile.
-- Session state is revalidated periodically and before sending. A failed or
-  expired validation clears the in-memory session and forces read-only mode.
-- Session refreshes are revision-guarded so an old failed request cannot erase a
-  newly connected account. Domain-cookie rotations and deletions are propagated
-  to the chat-edge cookie map, and auth/config/logout HTTP calls have bounded
-  timeouts.
-
-This cookie-based flow is a working compatibility implementation, not the final
-supported authentication design. Itzon's current OAuth documentation requires
-open-source desktop apps to use a public client with authorization-code PKCE
-(S256), an exact loopback redirect URI, no client secret, one-hour access tokens,
-and single-use rotating refresh tokens. Production work therefore requires an
-Itzon-registered client ID, serialized refreshes, atomic replacement of each
-token pair, and encrypted operating-system storage. The existing Itzon
-Chatterino fork is the local reference implementation for that flow.
+- A build containing `ITZON_OAUTH_CLIENT_ID` uses the supported public-client
+  authorization-code flow with PKCE S256 and an ephemeral `127.0.0.1` callback.
+  The authorization request contains no client secret and asks only for
+  `identity chat api:read`.
+- OAuth access and rotating refresh tokens are stored in the operating-system
+  credential store. Refreshes are serialized, the newly rotated pair is saved
+  before it replaces the in-memory pair, and active chat sockets reconnect when
+  the credential changes. An `invalid_grant` or expired refresh grant removes
+  the unusable local credential.
+- OAuth IRC authentication sends the access token as the first `PASS` command,
+  then registers with the authorized username. The implementation adapts the
+  already-tested approach in the MIT-licensed local Itzon Chatterino fork.
+- Until this fork receives its own registered client ID, Connect retains the
+  site-owned WebView compatibility flow. StreamNook never sees the password;
+  copied cookies remain process-memory only, while the dedicated WebView2
+  profile may retain the website's own browser storage.
+- Compatibility sessions are revision-guarded, periodically revalidated, and
+  cleared on expiry. Disconnect removes both OAuth credentials and the dedicated
+  compatibility profile.
 
 ## Remaining limitations
 
-- Itzon staff must register this fork as an OAuth public client before the
-  temporary website-cookie flow can be replaced. The supported scopes needed by
-  a viewer client are `identity chat api:read`.
+- Itzon staff must still register this fork as an OAuth public client. The PKCE,
+  loopback callback, token exchange, encrypted persistence, rotation, restore,
+  and IRC `PASS` paths are implemented; only the fork's 32-hex client ID is
+  missing.
 - The public API exposes a channel's followers but does not expose the signed-in
   viewer's native followed-channel list. The current sidebar and Following page
   use the internal `/api/main/v1/follows/mine` website endpoint. Production must
@@ -277,7 +276,7 @@ Chatterino fork is the local reference implementation for that flow.
   composer after the authenticated handshake. The in-app reload control also
   recovered playback/chat and advanced the feed from Race #339 to Race #340.
 - The final local validation rerun passed all 44 discovered frontend tests, the
-  production TypeScript/Vite build, all 178 discovered Rust tests (175 passed
+  production TypeScript/Vite build, all 182 discovered Rust tests (179 passed
   and three intentionally ignored), and `cargo fmt --check`. Targeted ESLint on
   the changed frontend surface reported zero errors and 96 warnings. The
   optional live Itzon + 7TV smoke test was run explicitly and passed 1/1.

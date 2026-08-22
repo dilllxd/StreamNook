@@ -4103,7 +4103,11 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
           onMouseLeave={() => { isHoveringChatRef.current = false; }}>
           {visibleMessages.length === 0 ? (
             <div className="h-full flex items-center justify-center">
-              <p className="text-textSecondary text-sm">Waiting for messages...</p>
+              <p className="text-textSecondary text-sm">
+                {provider === 'itzon'
+                  ? 'Chat connected. Waiting for the next message…'
+                  : 'Waiting for messages…'}
+              </p>
             </div>
           ) : (
             <ErrorBoundary componentName="ChatWidgetList" reportToLogService={true}>

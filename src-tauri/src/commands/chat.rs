@@ -341,6 +341,17 @@ pub fn itzon_account_name() -> Option<String> {
     crate::services::itzon_auth_service::account_name()
 }
 
+/// Bring up the local chat bridge without starting a provider adapter. The
+/// frontend uses this two-step path for providers that immediately replay a
+/// channel backlog: attach the WebSocket first, then connect the provider, so
+/// those first messages cannot be published before the webview is listening.
+#[tauri::command]
+pub async fn ensure_chat_bridge() -> Result<u16, String> {
+    IrcService::ensure_local_ws_bridge()
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn itzon_auth_method() -> String {
     crate::services::itzon_auth_service::auth_method().to_string()

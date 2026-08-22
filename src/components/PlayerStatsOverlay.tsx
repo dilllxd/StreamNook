@@ -81,7 +81,7 @@ function readMetrics(hls: Hls | null, video: HTMLVideoElement | null): Metrics {
     // construction. 'll'/'promotion' mean Twitch sent PREFETCH hints (streamer
     // LL on); 'plain' means they didn't (streamer LL off).
     const srcHint = (hls as unknown as { __snPathHint?: string }).__snPathHint;
-    if (srcHint === 'll' || srcHint === 'promotion') m.sourceLowLatency = true;
+    if (srcHint === 'll' || srcHint === 'itzon-ll' || srcHint === 'promotion') m.sourceLowLatency = true;
     else if (srcHint === 'plain') m.sourceLowLatency = false;
 
     const lvlIndex = hls.currentLevel >= 0 ? hls.currentLevel : hls.loadLevel;

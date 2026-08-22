@@ -18,7 +18,7 @@ use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::json;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, Mutex};
@@ -38,7 +38,7 @@ use uuid::Uuid;
 const WS_CONFIG_URL: &str = "https://itzon.tv/api/live/ws-config";
 const CONFIG_TIMEOUT_SECS: u64 = 15;
 const CONNECT_TIMEOUT_SECS: u64 = 20;
-const READ_TIMEOUT_SECS: u64 = 120;
+const HEARTBEAT_SECS: u64 = 30;
 const MAX_BACKOFF_SECS: u64 = 15;
 const RECENT_MESSAGE_LIMIT: usize = 250;
 const SEND_CONNECTING: u8 = 0;
@@ -53,6 +53,7 @@ struct Connection {
     task: JoinHandle<()>,
     outgoing: mpsc::Sender<Outgoing>,
     send_state: Arc<AtomicU8>,
+    connected: Arc<AtomicBool>,
 }
 
 struct Outgoing {
@@ -92,8 +93,28 @@ impl ChatProvider for ItzonProvider {
         let slug = normalize_channel(channel)?;
         let mut conns = self.conns.lock().await;
         if let Some(conn) = conns.get_mut(&slug) {
-            conn.consumers.insert(window.to_string());
-            return Ok(());
+            if conn.consumers.insert(window.to_string()) {
+                let connected = conn.connected.load(Ordering::SeqCst);
+                drop(conns);
+                publish_connection_state(
+                    &slug,
+                    connected,
+                    if connected {
+                        "connected"
+                    } else {
+                        "reconnecting"
+                    },
+                )
+                .await;
+                return Ok(());
+            }
+        }
+        // The same window label claiming again means its JS bridge was rebuilt
+        // (webview reload or watchdog reconnect). Recreate the upstream session
+        // too, so itzon replays its JOIN backlog into the newly attached socket.
+        if let Some(previous) = conns.remove(&slug) {
+            previous.task.abort();
+            dec_bridge_users();
         }
 
         let mut consumers = HashSet::new();
@@ -103,8 +124,10 @@ impl ChatProvider for ItzonProvider {
         let (outgoing, receiver) = mpsc::channel(32);
         let send_state = Arc::new(AtomicU8::new(SEND_CONNECTING));
         let task_send_state = send_state.clone();
+        let connected = Arc::new(AtomicBool::new(false));
+        let task_connected = connected.clone();
         let task = tokio::spawn(async move {
-            run_connection(http, task_slug, receiver, task_send_state).await
+            run_connection(http, task_slug, receiver, task_send_state, task_connected).await
         });
         conns.insert(
             slug,
@@ -113,6 +136,7 @@ impl ChatProvider for ItzonProvider {
                 task,
                 outgoing,
                 send_state,
+                connected,
             },
         );
         inc_bridge_users();
@@ -279,21 +303,43 @@ async fn run_connection(
     slug: String,
     mut outgoing: mpsc::Receiver<Outgoing>,
     send_state: Arc<AtomicU8>,
+    connected: Arc<AtomicBool>,
 ) {
     let mut backoff = 1;
+    let mut first_attempt = true;
     loop {
         send_state.store(SEND_CONNECTING, Ordering::SeqCst);
-        let clean_disconnect =
-            match connect_and_stream(&http, &slug, &mut outgoing, send_state.clone()).await {
-                Ok(()) => {
-                    log::info!("[itzon] chat '{}' disconnected", slug);
-                    true
-                }
-                Err(err) => {
-                    log::warn!("[itzon] chat '{}' error: {}", slug, err);
-                    false
-                }
-            };
+        connected.store(false, Ordering::SeqCst);
+        publish_connection_state(
+            &slug,
+            false,
+            if first_attempt {
+                "connecting"
+            } else {
+                "reconnecting"
+            },
+        )
+        .await;
+        let clean_disconnect = match connect_and_stream(
+            &http,
+            &slug,
+            &mut outgoing,
+            send_state.clone(),
+            connected.clone(),
+        )
+        .await
+        {
+            Ok(()) => {
+                log::info!("[itzon] chat '{}' disconnected", slug);
+                true
+            }
+            Err(err) => {
+                log::warn!("[itzon] chat '{}' error: {}", slug, err);
+                false
+            }
+        };
+        publish_connection_state(&slug, false, "reconnecting").await;
+        first_attempt = false;
         if clean_disconnect {
             backoff = 1;
         }
@@ -302,6 +348,32 @@ async fn run_connection(
             backoff = next_backoff(backoff);
         }
     }
+}
+
+async fn publish_connection_state(slug: &str, connected: bool, state: &str) {
+    publish_frame(
+        json!({
+            "type": "PROVIDER_CONNECTION",
+            "provider": "itzon",
+            "channel": key::make_key("itzon", slug),
+            "connected": connected,
+            "state": state,
+        })
+        .to_string(),
+    )
+    .await;
+}
+
+async fn publish_heartbeat(slug: &str) {
+    publish_frame(
+        json!({
+            "type": "PROVIDER_HEARTBEAT",
+            "provider": "itzon",
+            "channel": key::make_key("itzon", slug),
+        })
+        .to_string(),
+    )
+    .await;
 }
 
 fn next_backoff(current: u64) -> u64 {
@@ -313,6 +385,7 @@ async fn connect_and_stream(
     slug: &str,
     outgoing: &mut mpsc::Receiver<Outgoing>,
     send_state: Arc<AtomicU8>,
+    connected: Arc<AtomicBool>,
 ) -> Result<()> {
     // Resolve before JOIN so the server's backlog is parsed with the same emote
     // set as subsequent live messages.
@@ -375,15 +448,19 @@ async fn connect_and_stream(
     let mut confirmed_nick = nick.clone();
     let mut pending = VecDeque::<PendingSend>::new();
     let mut heartbeat = tokio::time::interval_at(
-        Instant::now() + Duration::from_secs(READ_TIMEOUT_SECS),
-        Duration::from_secs(READ_TIMEOUT_SECS),
+        Instant::now() + Duration::from_secs(HEARTBEAT_SECS),
+        Duration::from_secs(HEARTBEAT_SECS),
     );
+    let mut last_inbound = Instant::now();
     let mut maintenance = tokio::time::interval(Duration::from_millis(500));
     maintenance.tick().await;
 
     loop {
         tokio::select! {
             _ = heartbeat.tick() => {
+                if last_inbound.elapsed() > Duration::from_secs(HEARTBEAT_SECS * 3) {
+                    return Err(anyhow!("itzon chat stopped responding"));
+                }
                 write.send(Message::Ping(Vec::new().into())).await?;
             }
             _ = maintenance.tick() => {
@@ -444,6 +521,8 @@ async fn connect_and_stream(
             None => return Ok(()),
             Some(Err(err)) => return Err(err.into()),
             Some(Ok(Message::Text(text))) => {
+                last_inbound = Instant::now();
+                publish_heartbeat(slug).await;
                 for raw in text.split(['\r', '\n']).filter(|line| !line.is_empty()) {
                     let Some(line) = IrcLine::parse(raw) else {
                         continue;
@@ -493,6 +572,7 @@ async fn connect_and_stream(
                                 && joiner.eq_ignore_ascii_case(&confirmed_nick)
                             {
                                 joined = true;
+                                connected.store(true, Ordering::SeqCst);
                                 update_send_state(
                                     &send_state,
                                     joined,
@@ -501,6 +581,7 @@ async fn connect_and_stream(
                                     verified,
                                     banned,
                                 );
+                                publish_connection_state(slug, true, "connected").await;
                             }
                         }
                         "353" if line.params.get(2) == Some(&wanted_channel) => {
@@ -629,7 +710,13 @@ async fn connect_and_stream(
                 }
             }
             Some(Ok(Message::Ping(payload))) => {
+                last_inbound = Instant::now();
                 write.send(Message::Pong(payload)).await?;
+                publish_heartbeat(slug).await;
+            }
+            Some(Ok(Message::Pong(_))) => {
+                last_inbound = Instant::now();
+                publish_heartbeat(slug).await;
             }
             Some(Ok(Message::Close(frame))) => {
                 if let Some(frame) = frame {

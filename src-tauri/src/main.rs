@@ -873,6 +873,7 @@ fn main() {
             join_chat_channel,
             leave_chat_channel,
             start_multi_chat,
+            ensure_chat_bridge,
             provider_chat_connect,
             provider_chat_disconnect,
             provider_send_message,

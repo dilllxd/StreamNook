@@ -409,7 +409,7 @@ interface AppState {
   startOfflineChat: (channel: string, streamInfo?: TwitchStream) => Promise<void>;
   playMedia: (type: 'clip' | 'video', url: string, info: MediaInfo) => Promise<void>;
   stopStream: (options?: { preserveBackend?: boolean }) => Promise<void>;
-  restartStream: () => Promise<void>;  // Restart current stream (stops and starts again)
+  restartStream: (reason?: 'manual' | 'settings' | 'playback-recovery' | 'go-live' | 'refresh') => Promise<void>;
   isRestartingStream: boolean;  // True from restart begin until the new stream URL lands; the player freezes its loader on this so it doesn't poll a dead backend
   reloadStreamAndChat: () => Promise<void>;  // Hard refresh: restart the stream AND reconnect/reload chat
   getAvailableQualities: () => Promise<string[]>;
@@ -767,6 +767,32 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
 
+    if (!currentStream) {
+      Logger.debug('[AutoSwitch] No current stream to switch from');
+      return;
+    }
+
+    // itzon has no auto-switch target here. This path is also its player-stall
+    // recovery, so it must work even when the user's Twitch auto-switch setting
+    // is disabled.
+    if (currentStream.provider === 'itzon') {
+      try {
+        const status = await invoke<{ live: boolean }>('get_itzon_channel', {
+          username: currentStream.user_login,
+        });
+        if (status.live) {
+          await get().restartStream('playback-recovery');
+        } else {
+          get().addToast(`${currentStream.user_name} went offline on itzon`, 'info');
+          await get().stopStream();
+          set({ isHomeActive: true });
+        }
+      } catch (error) {
+        Logger.warn('[itzon] Could not verify stream liveness:', error);
+      }
+      return;
+    }
+
     // Check if a raid redirect recently happened (within last 15 seconds)
     // This prevents auto-switch from overriding a raid redirect
     const timeSinceRaidRedirect = Date.now() - lastRaidRedirectTime;
@@ -780,29 +806,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     const autoSwitchEnabled = settings.auto_switch?.enabled ?? true;
     if (!autoSwitchEnabled) {
       Logger.debug('[AutoSwitch] Disabled in settings');
-      return;
-    }
-
-    if (!currentStream) {
-      Logger.debug('[AutoSwitch] No current stream to switch from');
-      return;
-    }
-
-    if (currentStream.provider === 'itzon') {
-      try {
-        const status = await invoke<{ live: boolean }>('get_itzon_channel', {
-          username: currentStream.user_login,
-        });
-        if (status.live) {
-          await get().restartStream();
-        } else {
-          get().addToast(`${currentStream.user_name} went offline on itzon`, 'info');
-          await get().stopStream();
-          set({ isHomeActive: true });
-        }
-      } catch (error) {
-        Logger.warn('[itzon] Could not verify stream liveness:', error);
-      }
       return;
     }
 
@@ -1576,7 +1579,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  restartStream: async () => {
+  restartStream: async (reason = 'manual') => {
     const { currentStream, settings, currentMediaType, isAutoSwitching } = get();
     if (!currentStream) {
       Logger.warn('[Stream] Cannot restart: no current stream');
@@ -1595,7 +1598,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
 
-    Logger.info(`[Stream] Restarting stream for ${currentStream.user_login}...`);
+    Logger.info(`[Stream] Restarting stream for ${currentStream.user_login} (${reason})...`);
     trackActivity('Restarted stream');
 
     // Save current stream info
@@ -1644,8 +1647,16 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       set({ streamUrl: result.url, activeQuality: result.quality, adSource: adSourceFrom(result), availableQualities: result.available ?? [], currentStream: streamInfo, isRestartingStream: false });
 
-      // Show toast notification
-      get().addToast('Stream restarted with new settings', 'success');
+      const message = reason === 'settings'
+        ? 'Stream restarted with new settings'
+        : reason === 'playback-recovery'
+          ? `Playback stalled; reconnected to ${streamInfo.provider === 'itzon' ? 'itzon' : 'the stream'}`
+          : reason === 'go-live'
+            ? 'Jumped back to the live stream'
+            : reason === 'refresh'
+              ? 'Stream refreshed'
+              : 'Stream restarted';
+      get().addToast(message, reason === 'playback-recovery' ? 'info' : 'success');
     } catch (e) {
       Logger.error('[Stream] Failed to restart:', e);
 
@@ -1694,7 +1705,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     // live channel (clips/VODs hold no IRC connection), matching restartStream's
     // own live-only guard. Promise.allSettled so a failure in one half doesn't
     // abort the other.
-    const tasks: Promise<unknown>[] = [get().restartStream()];
+    const tasks: Promise<unknown>[] = [get().restartStream('refresh')];
     if (currentMediaType === 'live' && currentStream.user_login && currentStream.provider !== 'itzon') {
       tasks.push(
         (async () => {

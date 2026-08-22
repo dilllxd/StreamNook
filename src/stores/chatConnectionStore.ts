@@ -785,6 +785,20 @@ function setAllChannelsConnected(connected: boolean) {
   bumpRevision();
 }
 
+function setTwitchChannelsConnected(connected: boolean) {
+  for (const slice of useChatConnectionStore.getState().channels.values()) {
+    if (slice.provider === 'twitch') slice.isConnected = connected;
+  }
+  bumpRevision();
+}
+
+function setTwitchChannelsError(error: string | null) {
+  for (const slice of useChatConnectionStore.getState().channels.values()) {
+    if (slice.provider === 'twitch') slice.error = error;
+  }
+  bumpRevision();
+}
+
 function setAllChannelsError(error: string | null) {
   for (const slice of useChatConnectionStore.getState().channels.values()) {
     slice.error = error;
@@ -857,9 +871,13 @@ function startHealthCheck() {
           // { channel } rejects with a missing-arg error, which lands in the
           // catch below and silently turned this offline check into a chat
           // reconnect every time.
-          const online = await invoke<object | null>('check_stream_online', {
-            userLogin: currentStream.user_login,
-          });
+          const online = currentStream.provider === 'itzon'
+            ? (await invoke<{ live: boolean }>('get_itzon_channel', {
+                username: currentStream.user_login,
+              })).live
+            : !!(await invoke<object | null>('check_stream_online', {
+                userLogin: currentStream.user_login,
+              }));
           if (online) {
             Logger.debug('[ChatStore] Stream online but chat dead, reconnecting chat');
             watchdogCycles++;
@@ -1042,13 +1060,13 @@ async function connectBridgeForFirstChannel(
     Logger.debug(`[ChatStore] Invoking bridge connect for ${channel} (${provider})`);
     chatConnectStartedAt = performance.now();
     chatFirstFrameLogged = false;
-    const port =
-      provider === 'twitch'
-        ? await invoke<number>('start_chat', { channel, reattach })
-        : await invoke<number>('provider_chat_connect', {
-            provider,
-            channel: bareChannel ?? channel,
-          });
+    // itzon sends recent channel messages immediately after JOIN. Starting its
+    // adapter before this webview opens the local bridge loses that backlog to
+    // the broadcast channel and leaves a healthy pane looking empty until the
+    // next live message. Non-Twitch providers therefore attach locally first.
+    const port = provider === 'twitch'
+      ? await invoke<number>('start_chat', { channel, reattach })
+      : await invoke<number>('ensure_chat_bridge');
     Logger.info(`[ChatPerf] bridge connect took ${Math.round(performance.now() - chatConnectStartedAt)}ms`);
     useChatConnectionStore.setState({ wsPort: port });
 
@@ -1089,7 +1107,35 @@ async function connectBridgeForFirstChannel(
       }
     };
 
-    setAllChannelsConnected(true);
+    if (provider === 'itzon') {
+      withSlice(channel, (slice) => {
+        slice.isConnected = false;
+        slice.error = null;
+      });
+    }
+
+    if (provider !== 'twitch') {
+      try {
+        await invoke<number>('provider_chat_connect', {
+          provider,
+          channel: bareChannel ?? channel,
+        });
+      } catch (error) {
+        socket.onmessage = null;
+        socket.onerror = null;
+        socket.onclose = null;
+        socket.close(1000, 'Provider connect failed');
+        if (ws === socket) ws = null;
+        throw error;
+      }
+    }
+
+    // Twitch's start command establishes IRC before returning. Other providers
+    // historically expose only task-start readiness; itzon now publishes a
+    // channel-scoped connection frame once its upstream JOIN actually lands.
+    if (provider !== 'itzon') {
+      setAllChannelsConnected(true);
+    }
     startHealthCheck();
 
     // After first-channel connect, pre-load recent messages (Twitch-only: the
@@ -1258,7 +1304,7 @@ function handleWsMessage(raw: string) {
 
   // Global signals first
   if (raw === 'HEARTBEAT') {
-    setAllChannelsError(null);
+    setTwitchChannelsError(null);
     return;
   }
 
@@ -1267,8 +1313,8 @@ function handleWsMessage(raw: string) {
     Logger.info(`[ChatPerf] first chat frame relayed ${Math.round(performance.now() - chatConnectStartedAt)}ms after connect start`);
   }
   if (raw === 'IRC_CONNECTED' || raw === 'RECONNECTED') {
-    setAllChannelsConnected(true);
-    setAllChannelsError(null);
+    setTwitchChannelsConnected(true);
+    setTwitchChannelsError(null);
     reconnectAttempts = 0;
     watchdogCycles = 0;
     if (backendReconnecting) {
@@ -1302,28 +1348,28 @@ function handleWsMessage(raw: string) {
         }
       }
     }
-    setAllChannelsError('Reconnecting to chat...');
+    setTwitchChannelsError('Reconnecting to chat...');
     return;
   }
   if (raw.startsWith('RECONNECTING:')) {
-    setAllChannelsConnected(false);
+    setTwitchChannelsConnected(false);
     return;
   }
   if (raw.startsWith('RECONNECT_FAILED:')) {
     return;
   }
   if (raw === 'RECONNECT_STOPPED' || raw === 'RECONNECT_EXHAUSTED') {
-    setAllChannelsError(
+    setTwitchChannelsError(
       raw === 'RECONNECT_EXHAUSTED'
         ? 'Unable to reconnect to chat. Please refresh.'
         : 'Connection stopped',
     );
-    setAllChannelsConnected(false);
+    setTwitchChannelsConnected(false);
     return;
   }
   if (raw.startsWith('CONNECTION_WARNING:')) {
     const warn = raw.slice('CONNECTION_WARNING:'.length);
-    setAllChannelsError(`Warning: ${warn}`);
+    setTwitchChannelsError(`Warning: ${warn}`);
     return;
   }
 
@@ -1409,6 +1455,30 @@ function handleWsMessage(raw: string) {
   if (raw.startsWith('{')) {
     try {
       const parsed = JSON.parse(raw);
+      if (parsed.type === 'PROVIDER_CONNECTION') {
+        const ch = (parsed.channel as string | undefined)?.toLowerCase();
+        if (ch) {
+          withSlice(ch, (slice) => {
+            slice.isConnected = parsed.connected === true;
+            slice.error = parsed.connected
+              ? null
+              : parsed.state === 'reconnecting'
+                ? 'Reconnecting to chat...'
+                : null;
+          });
+        }
+        return;
+      }
+      if (parsed.type === 'PROVIDER_HEARTBEAT') {
+        const ch = (parsed.channel as string | undefined)?.toLowerCase();
+        if (ch) {
+          withSlice(ch, (slice) => {
+            slice.isConnected = true;
+            slice.error = null;
+          });
+        }
+        return;
+      }
       if (parsed.type === 'CLEARMSG' && parsed.target_msg_id) {
         const ch = (parsed.channel as string | undefined)?.toLowerCase();
         const modSettings = useAppStore.getState().settings.moderation;
@@ -2288,7 +2358,11 @@ export async function acquireChannel(
     // once the adapter publishes, routed by the composite channel key.
     try {
       await invoke('provider_chat_connect', { provider, channel });
-      slice.isConnected = true;
+      // itzon reports connected only after its upstream JOIN completes. The
+      // adapter's connection frame updates this slice; do not mistake a spawned
+      // reconnect task for a working chat session.
+      slice.isConnected = provider !== 'itzon';
+      slice.error = null;
       bumpRevision();
     } catch (err) {
       Logger.error(`[ChatStore] provider_chat_connect failed for ${key}:`, err);

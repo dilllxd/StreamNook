@@ -796,23 +796,28 @@ const VideoPlayer = () => {
     } else if (Hls.isSupported()) {
       Logger.debug('[HLS] HLS.js is supported, creating player...');
 
-      // Is the relay's parts-based LL-HLS origin active for this channel? It is brought
-      // up at stream start (before this runs), and `lowLatencyMode` can only be chosen at
-      // construction, so resolve it now. The experimental-low-latency setting drives the
-      // backend origin kill switch, so this single signal already reflects it: when the
-      // setting is off (or the channel isn't low-latency) the origin is inactive and this
-      // is false, and we use the stable whole-segment path (cushion + governor).
-      let isLowLatencyChannel = false;
+      // Resolve the Twitch relay's parts-based LL-HLS state before constructing
+      // hls.js. itzon is handled separately because its upstream playlist already
+      // carries native LL-HLS parts and intentionally bypasses that relay origin.
+      const isItzonChannel = useAppStore.getState().currentStream?.provider === 'itzon';
+      let relayLowLatencyActive = false;
       try {
-        isLowLatencyChannel = await invoke<boolean>('get_stream_low_latency');
+        relayLowLatencyActive = await invoke<boolean>('get_stream_low_latency');
       } catch { /* command unavailable / stream gone */ }
+      // itzon's upstream is already native LL-HLS (#EXT-X-PART with blocking
+      // reload), so it does not use StreamNook's Twitch-oriented LL origin. It
+      // still must run hls.js in low-latency mode or the player ignores 200ms
+      // parts, waits for complete 2s segments, and can drain its forward buffer.
+      const isLowLatencyChannel = relayLowLatencyActive || isItzonChannel;
       // Superseded while awaiting the probe: a newer invocation (or teardown)
       // owns the element now. Constructing would create the zombie player.
       if (seq !== createSeqRef.current) {
         Logger.debug('[HLS] Player init superseded mid-probe; aborting this invocation');
         return;
       }
-      Logger.debug(`[HLS] LL-HLS origin active=${isLowLatencyChannel}`);
+      Logger.debug(
+        `[HLS] low-latency parts=${isLowLatencyChannel} (relay=${relayLowLatencyActive}, itzon=${isItzonChannel})`,
+      );
 
       // The viewer's preferred behind-live target (displayed seconds), converted to the
       // real cushion/governor value PER PATH so the displayed number tracks the setting
@@ -823,9 +828,16 @@ const VideoPlayer = () => {
       // segments arrive with delivery jitter), so the per-channel stall-adaptive cushion
       // settles it where that channel stays smooth.
       const llTargetDisplayed = currentSettings.ll_target_latency ?? LL_TARGET_DEFAULT;
-      const llTargetRaw = isLowLatencyChannel
+      const llTargetRaw = relayLowLatencyActive
         ? llTargetDisplayed + LL_DISPLAY_CALIBRATION
         : llTargetDisplayed;
+      const latencyChannelKey = isItzonChannel && currentStream?.user_login
+        ? makeKey('itzon', currentStream.user_login)
+        : currentStream?.user_login;
+      const liveSyncDuration = learnedLLCushion(
+        latencyChannelKey,
+        isItzonChannel ? Math.max(5, Math.min(10, llTargetRaw)) : llTargetRaw,
+      );
 
       // Create HLS.js instance with optimized settings
       const hls = new Hls({
@@ -878,7 +890,7 @@ const VideoPlayer = () => {
           },
         } : false,
         enableWorker: true,
-        lowLatencyMode: isLowLatencyChannel, // Per-channel: true only when the relay LL-HLS origin is serving parts. Universal true would activate hls.js's playback-rate controller on normal channels and fight liveLatencyGovernor.
+        lowLatencyMode: isLowLatencyChannel, // True for the relay's part origin or itzon's native part playlist; false for ordinary whole-segment sources.
         startFragPrefetch: false, // Disabled: prefetching double-buffers massive TS chunks in V8 heap
         backBufferLength: 30, // Keep 30 seconds of back buffer
         maxBufferLength: currentSettings.max_buffer_length || 30, // Buffer ahead
@@ -895,8 +907,11 @@ const VideoPlayer = () => {
         // delivery jitter), so a capable channel/system holds the gap and a jittery one
         // settles where it's smooth. The Low Latency engine (when on) is what lets the
         // lowest gaps stay smooth on supported channels; without it, low gaps self-limit.
-        liveSyncDuration: learnedLLCushion(currentStream?.user_login, llTargetRaw),
-        liveMaxLatencyDuration: 60, // Capped to 60s to allow GC. Prevents holding massive 10min TS buffers in RAM. Must stay > liveSyncDuration.
+        liveSyncDuration,
+        // itzon's own fallback player keeps a much tighter live window. Letting
+        // its part-aware playlist drift for 60s makes a recovery more disruptive
+        // and is unnecessary with a ~60s DVR manifest.
+        liveMaxLatencyDuration: isItzonChannel ? Math.max(12, liveSyncDuration + 2) : 60,
         // 1 = hls.js's latency controller is fully inert on EVERY path (its rate is
         // quantized to 0.05 steps — dist ~32618 — and each abrupt step is audible
         // through the pitch corrector as a pop/warble, obvious on music, and reads
@@ -926,9 +941,11 @@ const VideoPlayer = () => {
       // metric. 'll' = the parts-based LL-HLS origin (hls.latency is honest there, and
       // the overlay subtracts a fixed calibration so the number is Twitch-comparable);
       // 'plain' = the stable whole-segment path (hls.latency shown directly).
-      (hls as unknown as { __snPathHint?: string }).__snPathHint = isLowLatencyChannel
-        ? 'll'
-        : 'plain';
+      (hls as unknown as { __snPathHint?: string }).__snPathHint = isItzonChannel
+        ? 'itzon-ll'
+        : relayLowLatencyActive
+          ? 'll'
+          : 'plain';
 
       hlsRef.current = hls;
 
@@ -969,7 +986,7 @@ const VideoPlayer = () => {
             // llTargetRaw) so moving the gap slider mid-stream takes effect at once.
             latencyTarget: () =>
               (playerSettingsRef.current.ll_target_latency ?? LL_TARGET_DEFAULT) +
-              LL_DISPLAY_CALIBRATION,
+              (isItzonChannel ? 0 : LL_DISPLAY_CALIBRATION),
             getLatency: () =>
               typeof hls.latency === 'number' && hls.latency > 0 ? hls.latency : null,
             gain: 0.12,
@@ -1042,7 +1059,7 @@ const VideoPlayer = () => {
               lastRecover = Date.now();
               over = 0;
               if (end === 0) {
-                restartStream();
+                restartStream('playback-recovery');
               } else {
                 const target = end - cushion;
                 if (target > v.currentTime + 0.5) {
@@ -1080,7 +1097,7 @@ const VideoPlayer = () => {
               }
               if (!snapped) {
                 Logger.debug('[HLS] behind-live watchdog: playhead frozen with no reachable buffer, restarting to re-anchor to live');
-                restartStream();
+                restartStream('playback-recovery');
               }
             }
           } else {
@@ -1238,13 +1255,65 @@ const VideoPlayer = () => {
             if (pos != null && Number.isFinite(pos) && pos > 0) {
               video.currentTime = pos;
             }
-            Logger.debug(
-              `[HLS] Level loaded (LL) — starting playback at ${video.currentTime.toFixed(2)}`,
-            );
-            video.play().catch(() => {
-              video.muted = true;
-              video.play().catch(() => Logger.debug('[HLS] LL muted autoplay also failed'));
-            });
+
+            if (!currentSettings.autoplay) return;
+            if (!isItzonChannel) {
+              Logger.debug(
+                `[HLS] Level loaded (LL) — starting playback at ${video.currentTime.toFixed(2)}`,
+              );
+              video.play().catch(() => {
+                video.muted = true;
+                video.play().catch(() => Logger.debug('[HLS] LL muted autoplay also failed'));
+              });
+              return;
+            }
+
+            // itzon's first-party player waits for 2.5s ahead of the selected
+            // playhead before starting. Measuring forward buffer, rather than
+            // total buffered depth, prevents an old range behind the playhead
+            // from satisfying the gate while the live edge has no runway.
+            let started = false;
+            const startItzonPlayback = (reason: string) => {
+              if (started) return;
+              started = true;
+              hls.off(Hls.Events.BUFFER_APPENDED, tryStartItzonPlayback);
+              if (bufferGateTimeoutRef.current) {
+                clearTimeout(bufferGateTimeoutRef.current);
+                bufferGateTimeoutRef.current = null;
+              }
+              Logger.debug(
+                `[HLS] itzon startup gate cleared (${reason}) at ${video.currentTime.toFixed(2)}`,
+              );
+              video.play().catch(() => {
+                video.muted = true;
+                video.play().catch(() => Logger.debug('[HLS] itzon muted autoplay also failed'));
+              });
+            };
+            const tryStartItzonPlayback = () => {
+              const buffered = video.buffered;
+              for (let i = 0; i < buffered.length; i++) {
+                const start = buffered.start(i);
+                const end = buffered.end(i);
+                if (video.currentTime >= start - 0.05 && video.currentTime <= end + 0.05) {
+                  const forward = end - video.currentTime;
+                  if (forward >= 2.5) startItzonPlayback(`${forward.toFixed(1)}s forward buffer`);
+                  return;
+                }
+              }
+            };
+            hls.on(Hls.Events.BUFFER_APPENDED, tryStartItzonPlayback);
+            bufferGateTimeoutRef.current = setTimeout(() => {
+              if (started) return;
+              const buffered = video.buffered;
+              if (buffered.length > 0) {
+                const last = buffered.length - 1;
+                const start = buffered.start(last);
+                const end = buffered.end(last);
+                video.currentTime = Math.max(start + 0.05, end - cushion);
+              }
+              startItzonPlayback('5s timeout');
+            }, 5000);
+            tryStartItzonPlayback();
           });
         } else {
           // Non-LL: don't play here. The FRAG_BUFFERED gate below calls play() once
@@ -1297,7 +1366,7 @@ const VideoPlayer = () => {
                 );
                 // Remember per channel so the next session starts here instead
                 // of re-discovering the wobble one stall at a time.
-                rememberLLCushion(currentStream?.user_login, hls.config.liveSyncDuration);
+                rememberLLCushion(latencyChannelKey, hls.config.liveSyncDuration);
               }
             }
 
@@ -1848,7 +1917,7 @@ const VideoPlayer = () => {
       .finally(() => {
         if (currentStream && currentMediaType === 'live') {
           Logger.debug('[HLS] Low Latency toggled — restarting stream to apply');
-          restartStream();
+          restartStream('settings');
         }
       });
   }, [playerSettings.experimental_low_latency]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -2021,7 +2090,7 @@ const VideoPlayer = () => {
     const pos = hls.liveSyncPosition;
     const syncPos = pos != null && Number.isFinite(pos) ? pos : null;
     if (bufferedEnd === 0 || (syncPos != null && syncPos - bufferedEnd > 5)) {
-      restartStream();
+      restartStream('go-live');
       return;
     }
     const target = Math.min(syncPos ?? Infinity, bufferedEnd - 2);

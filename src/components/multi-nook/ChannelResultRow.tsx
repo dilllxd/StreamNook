@@ -1,6 +1,7 @@
 import React from 'react';
 import { Plus, Users } from 'lucide-react';
 import { ChannelItem, DEFAULT_AVATAR } from './channelSearch';
+import { ProviderLogo } from '../ProviderLogo';
 
 /** One row in a channel smart-list. Renders both live follows and Twitch search
  *  hits identically, with an optional trailing slot for a non-add affordance
@@ -15,6 +16,13 @@ export const ChannelResultRow: React.FC<{
   onSelect: (item: ChannelItem) => void;
   onHover: (index: number) => void;
 }> = ({ item, index, highlighted, disabled = false, trailing, onSelect, onHover }) => {
+  const viewerLabel =
+    item.viewerCount === undefined
+      ? null
+      : item.viewerCount >= 1000
+        ? `${(item.viewerCount / 1000).toFixed(item.viewerCount >= 10000 ? 0 : 1)}K`
+        : String(item.viewerCount);
+
   return (
     <button
       data-idx={index}
@@ -56,12 +64,15 @@ export const ChannelResultRow: React.FC<{
 
       {/* Info */}
       <div className="flex-1 min-w-0">
-        <span
-          className={`block text-[13px] font-semibold truncate leading-tight transition-colors ${
-            highlighted ? 'text-accent' : 'text-textPrimary group-hover:text-accent'
-          }`}
-        >
-          {item.displayName}
+        <span className="flex items-center gap-1.5 min-w-0">
+          <ProviderLogo provider={item.provider ?? 'twitch'} size={10} />
+          <span
+            className={`block text-[13px] font-semibold truncate leading-tight transition-colors ${
+              highlighted ? 'text-textPrimary' : 'text-textPrimary group-hover:text-white'
+            }`}
+          >
+            {item.displayName}
+          </span>
         </span>
         <span className="block text-[11px] text-textMuted truncate mt-0.5 leading-tight">
           {item.isLive && item.gameName ? item.gameName : item.isLive ? 'Live' : item.login}
@@ -72,15 +83,15 @@ export const ChannelResultRow: React.FC<{
       {trailing !== undefined ? (
         trailing
       ) : (
-        <div
-          className={`w-6 h-6 rounded-full flex items-center justify-center transition-all duration-200 shrink-0 ${
-            highlighted ? 'bg-accent/15' : 'bg-transparent group-hover:bg-accent/15'
-          }`}
-        >
-          <Plus
-            size={13}
-            className={`transition-colors ${highlighted ? 'text-accent' : 'text-textMuted group-hover:text-accent'}`}
-          />
+        <div className="flex items-center gap-2 shrink-0">
+          {viewerLabel && <span className="text-[10px] tabular-nums text-textMuted">{viewerLabel}</span>}
+          <div
+            className={`w-6 h-6 rounded-md flex items-center justify-center transition-colors duration-150 ${
+              highlighted ? 'bg-white/[0.07]' : 'bg-transparent group-hover:bg-white/[0.07]'
+            }`}
+          >
+            <Plus size={13} className="text-textMuted group-hover:text-textPrimary transition-colors" />
+          </div>
         </div>
       )}
     </button>

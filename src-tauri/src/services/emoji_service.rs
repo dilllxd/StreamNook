@@ -2887,7 +2887,7 @@ pub fn convert_emoji_shortcodes(text: &str) -> String {
         if ch == ':' {
             // Try to match a shortcode
             let mut shortcode = String::from(":");
-            let mut matched = false;
+            let mut emitted = false;
 
             // Collect characters until we find another : or invalid character
             while let Some(&next_ch) = chars.peek() {
@@ -2898,16 +2898,17 @@ pub fn convert_emoji_shortcodes(text: &str) -> String {
                     // Try to find the shortcode in the map
                     if let Some(&emoji) = SHORTCODE_TO_UNICODE.get(&shortcode as &str) {
                         result.push_str(emoji);
-                        matched = true;
+                        emitted = true;
                     } else {
                         // Try without colons
                         let inner = &shortcode[1..shortcode.len() - 1];
                         if let Some(&emoji) = SHORTCODE_TO_UNICODE.get(inner) {
                             result.push_str(emoji);
-                            matched = true;
+                            emitted = true;
                         } else {
                             // No match, keep original
                             result.push_str(&shortcode);
+                            emitted = true;
                         }
                     }
                     break;
@@ -2920,20 +2921,9 @@ pub fn convert_emoji_shortcodes(text: &str) -> String {
                 }
             }
 
-            if !matched {
-                // No closing : found or no match, output what we collected
-                if shortcode.len() > 1 && !shortcode.ends_with(':') {
-                    result.push_str(&shortcode);
-                } else if !matched {
-                    result.push(':');
-                    // Put back the collected characters if we didn't consume a full shortcode
-                    if shortcode.len() > 1 && shortcode.ends_with(':') {
-                        // We consumed a full potential shortcode but it didn't match
-                        result.push_str(&shortcode[1..]);
-                    } else {
-                        result.push_str(&shortcode[1..]);
-                    }
-                }
+            if !emitted {
+                // No closing : was found, so preserve the text we collected.
+                result.push_str(&shortcode);
             }
         } else {
             result.push(ch);

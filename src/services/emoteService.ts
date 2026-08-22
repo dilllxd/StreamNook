@@ -500,6 +500,38 @@ export async function fetchKickChannelEmotes(slug: string): Promise<EmoteSet> {
   }
 }
 
+/** Fetch itzon's 7TV globals plus the channel set selected by its
+ * `emoteTwitchId`. The Rust adapter owns metadata resolution and caching so
+ * incoming messages and this picker always use the same set. */
+export async function fetchItzonChannelEmotes(slug: string): Promise<EmoteSet> {
+  await ensureEmoteFileCache();
+  try {
+    const emoteSet = await invoke<EmoteSet>('get_itzon_channel_emotes', { slug });
+    const enhance = (emotes: any[]) =>
+      (emotes ?? []).map((emote) => {
+        const localPath = cachedEmoteFiles.get(emoteCacheKey(emote.id, emote.provider));
+        return {
+          ...emote,
+          isZeroWidth: emote.is_zero_width ?? emote.isZeroWidth,
+          modifierFlags: emote.modifier_flags ?? emote.modifierFlags,
+          ffzSubOnly: emote.ffz_sub_only ?? emote.ffzSubOnly,
+          localUrl: localPath ? convertFileSrc(localPath) : undefined,
+        };
+      });
+    Logger.info(`[EmoteService] itzon emotes for "${slug}": ${emoteSet['7tv']?.length ?? 0} 7TV`);
+    return {
+      twitch: enhance(emoteSet.twitch),
+      bttv: enhance(emoteSet.bttv),
+      '7tv': enhance(emoteSet['7tv']),
+      ffz: enhance(emoteSet.ffz),
+      kick: enhance(emoteSet.kick),
+    };
+  } catch (error) {
+    Logger.warn('[EmoteService] Failed to fetch itzon channel emotes:', error);
+    return { twitch: [], bttv: [], '7tv': [], ffz: [], kick: [] };
+  }
+}
+
 /**
  * Get a specific emote by name from the Rust cache
  */

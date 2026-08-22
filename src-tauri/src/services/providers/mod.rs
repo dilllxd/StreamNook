@@ -6,6 +6,8 @@
 //! source-key codec, and (added per phase) the provider trait + registry +
 //! generic chat webview. Twitch keeps its own dedicated path in `irc_service`.
 
+pub mod itzon;
+pub mod itzon_emotes;
 pub mod key;
 pub mod kick;
 pub mod kick_emotes;
@@ -90,8 +92,7 @@ pub trait ChatProvider: Send + Sync {
     async fn disconnect(&self, channel: &str, window: &str) -> Result<()>;
     /// Send `text` to `channel` as the connected account, if any. `reply_to` is the
     /// platform message id being replied to (None for a normal message).
-    async fn send(&self, channel: &str, text: &str, reply_to: Option<&str>)
-        -> Result<SendOutcome>;
+    async fn send(&self, channel: &str, text: &str, reply_to: Option<&str>) -> Result<SendOutcome>;
     /// Whether sending to `channel` is currently possible.
     async fn send_capability(&self, channel: &str) -> SendCapability;
 }
@@ -121,6 +122,7 @@ pub async fn registry() -> &'static ProviderRegistry {
     REGISTRY
         .get_or_init(|| async {
             let mut reg = ProviderRegistry::default();
+            reg.register(Arc::new(itzon::ItzonProvider::new()));
             reg.register(Arc::new(kick::KickProvider::new()));
             reg.register(Arc::new(youtube::YouTubeProvider::new()));
             reg.register(Arc::new(tiktok::TikTokProvider::new()));

@@ -9,6 +9,7 @@ import { useChannelSocial } from '../../hooks/useChannelSocial';
 import StreamTitleWithEmojis from '../StreamTitleWithEmojis';
 import { Tooltip } from '../ui/Tooltip';
 import { TwitchVerifiedMark } from '../ui/TwitchGlyph';
+import { ProviderLogo } from '../ProviderLogo';
 import { GripHorizontal, Undo2, Loader2, RefreshCcw, EyeOff, WifiOff, Maximize2, Minimize2 } from 'lucide-react';
 import { Heart, HeartBreak, X as XIcon } from 'phosphor-react';
 import { Logger } from '../../utils/logger';
@@ -36,6 +37,7 @@ const clearPendingFocusToggle = () => {
 
 const MultiNookCellInner: React.FC<MultiNookCellProps> = ({ slot, cssOrder, gridSpanClass = '', customStyle = {}, isMaximized = false }) => {
   const { id, channelLogin, channelName, channelId, volume, muted, isFocused, streamUrl, isMinimized = false, loadError, profileImageUrl, title, broadcasterType } = slot;
+  const provider = slot.provider ?? 'twitch';
   // Actions only, so read them without subscribing. A bare `usemultiNookStore()`
   // here subscribed this tile to the WHOLE store, which meant any mutation
   // (including a volume drag on a sibling tile) re-rendered every tile in the
@@ -57,7 +59,7 @@ const MultiNookCellInner: React.FC<MultiNookCellProps> = ({ slot, cssOrder, grid
   // Follow + subscribe controls. Only the focused, non-docked tile activates the
   // hook so we make one follow/subscription lookup at a time instead of one per
   // tile across the whole grid.
-  const socialEnabled = isFocused && !isMinimized;
+  const socialEnabled = provider === 'twitch' && isFocused && !isMinimized;
   const {
     isFollowing,
     followLoading,
@@ -410,7 +412,8 @@ const MultiNookCellInner: React.FC<MultiNookCellProps> = ({ slot, cssOrder, grid
                   {channelName || channelLogin}
                 </h3>
               </Tooltip>
-              {broadcasterType === 'partner' && (
+              <ProviderLogo provider={provider} size={12} />
+              {provider === 'twitch' && broadcasterType === 'partner' && (
                 <TwitchVerifiedMark size={14} className="text-[#9146FF] shrink-0" />
               )}
               {isFocused && (

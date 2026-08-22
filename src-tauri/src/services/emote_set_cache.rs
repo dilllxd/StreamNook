@@ -116,7 +116,10 @@ fn write_set(channel_id: &str, set: &EmoteSet) {
     let path = match path_for(channel_id) {
         Ok(p) => p,
         Err(e) => {
-            warn!("[EmoteSetCache] skip save, bad channel id {}: {}", channel_id, e);
+            warn!(
+                "[EmoteSetCache] skip save, bad channel id {}: {}",
+                channel_id, e
+            );
             return;
         }
     };

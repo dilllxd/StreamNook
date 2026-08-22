@@ -37,10 +37,21 @@ export default function ConnectionsSettings() {
   const [youtubeConnected, setYoutubeConnected] = useState(false);
   const [youtubeName, setYoutubeName] = useState<string | null>(null);
   const [youtubeBusy, setYoutubeBusy] = useState(false);
+  const [itzonConnected, setItzonConnected] = useState(false);
+  const [itzonName, setItzonName] = useState<string | null>(null);
+  const [itzonBusy, setItzonBusy] = useState(false);
 
   useEffect(() => {
     let active = true;
     const check = async () => {
+      try {
+        const connected = await invoke<boolean>('itzon_restore_session');
+        if (!active) return;
+        setItzonConnected(connected);
+        setItzonName(connected ? await invoke<string | null>('itzon_account_name') : null);
+      } catch {
+        /* ignore */
+      }
       try {
         const c = await invoke<boolean>('kick_is_connected');
         if (!active) return;
@@ -84,6 +95,26 @@ export default function ConnectionsSettings() {
       .finally(() => setKickBusy(false));
   }, []);
 
+  const connectItzon = useCallback(() => {
+    setItzonBusy(true);
+    void invoke('itzon_connect')
+      .then(async () => {
+        setItzonConnected(true);
+        setItzonName(await invoke<string | null>('itzon_account_name'));
+      })
+      .catch((error) => Logger.warn('[itzon] connect failed:', error))
+      .finally(() => setItzonBusy(false));
+  }, []);
+
+  const disconnectItzon = useCallback(() => {
+    void invoke('itzon_disconnect')
+      .then(() => {
+        setItzonConnected(false);
+        setItzonName(null);
+      })
+      .catch(() => {});
+  }, []);
+
   const disconnectKick = useCallback(() => {
     void invoke('kick_disconnect')
       .then(() => setKickConnected(false))
@@ -106,6 +137,7 @@ export default function ConnectionsSettings() {
 
   const statusFor = (p: ProviderId): Status => {
     if (p === 'twitch') return 'native';
+    if (p === 'itzon') return itzonConnected ? 'connected' : 'disconnected';
     if (p === 'kick') return kickConnected ? 'connected' : 'disconnected';
     if (p === 'youtube') return youtubeConnected ? 'connected' : 'disconnected';
     return PROVIDERS[p].enabled ? 'disconnected' : 'soon';
@@ -118,6 +150,9 @@ export default function ConnectionsSettings() {
     }
     if (p === 'kick' && status === 'connected') {
       return kickName ? `Connected as ${kickName}` : 'Connected';
+    }
+    if (p === 'itzon' && status === 'connected') {
+      return itzonName ? `Connected as ${itzonName}` : 'Connected';
     }
     if (p === 'youtube' && status === 'connected') {
       return youtubeName ? `Connected as ${youtubeName}` : 'Connected';
@@ -154,7 +189,27 @@ export default function ConnectionsSettings() {
                 </div>
               </div>
 
-              {/* Action — Kick + YouTube connect through here. */}
+              {/* Account-backed providers connect through their own consent flow. */}
+              {p === 'itzon' &&
+                (itzonConnected ? (
+                  <button
+                    type="button"
+                    onClick={disconnectItzon}
+                    className="glass-button-secondary shrink-0 px-3 py-1 text-xs font-medium text-textSecondary transition-colors hover:text-red-400"
+                  >
+                    Disconnect
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={connectItzon}
+                    disabled={itzonBusy}
+                    className="glass-button-secondary shrink-0 px-3 py-1 text-xs font-semibold transition-colors disabled:opacity-60"
+                    style={{ color: PROVIDERS.itzon.color }}
+                  >
+                    {itzonBusy ? 'Waiting for sign-in…' : 'Connect'}
+                  </button>
+                ))}
               {p === 'kick' &&
                 (kickConnected ? (
                   <button

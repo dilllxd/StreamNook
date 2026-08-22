@@ -25,7 +25,7 @@ import { makeKey, parseKey } from '../utils/providerKey';
 import { parseBadges } from '../services/twitchBadges';
 import { invoke } from '@tauri-apps/api/core';
 import { fetchRecentMessagesAsIRC } from '../services/ivrService';
-import { fetchAllEmotes, fetchKickChannelEmotes, type EmoteSet } from '../services/emoteService';
+import { fetchAllEmotes, fetchItzonChannelEmotes, fetchKickChannelEmotes, type EmoteSet } from '../services/emoteService';
 import { Logger } from '../utils/logger';
 import { useAppStore } from './AppStore';
 import { useGiftBombStore, type GiftRecipient } from './giftBombStore';
@@ -33,6 +33,7 @@ import { giftBombOriginOf, isGiftBombAnnouncement, isGiftBombChild } from '../ut
 import { useMessageRepeatStore, type RepeatParticipant } from './messageRepeatStore';
 import { normalizeForRepeat, isPrivilegedChatter } from '../utils/messageRepeat';
 import type { SongMatch } from '../utils/songId';
+import { SharedAttemptGate } from '../utils/sharedAttemptGate';
 
 // Hard caps borrowed from the prior single-channel hook. Keeping them as
 // per-channel limits means a 5-channel MultiChat caps memory at 5x the
@@ -150,7 +151,11 @@ export const useChatConnectionStore = create<ChatConnectionState>(() => ({
 // closures avoids subtle issues with stale references inside the WS callbacks.
 
 let ws: WebSocket | null = null;
-let wsConnecting = false;
+// Every acquisition in one webview shares the same in-flight bridge attempt.
+// A boolean gate made concurrent callers return immediately, so if the first
+// caller later failed (for example an expired Twitch token) a second provider
+// could connect in Rust but this window never opened its local WebSocket.
+const wsConnectGate = new SharedAttemptGate<void>();
 let reconnectAttempts = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let healthCheckTimer: ReturnType<typeof setInterval> | null = null;
@@ -412,6 +417,8 @@ export async function ensureChannelEmotes(
       const set =
         provider === 'kick'
           ? await fetchKickChannelEmotes(channel.toLowerCase())
+          : provider === 'itzon'
+            ? await fetchItzonChannelEmotes(channel.toLowerCase())
           : provider === 'youtube' || provider === 'tiktok'
             ? null
             : await fetchAllEmotes(channel.toLowerCase(), channelId);
@@ -1028,12 +1035,10 @@ async function connectBridgeForFirstChannel(
   // the composite slice key). Defaults to the slice key for Twitch.
   bareChannel?: string,
 ): Promise<void> {
-  if (wsConnecting) {
-    Logger.debug('[ChatStore] WS already connecting, skipping duplicate request');
-    return;
+  if (wsConnectGate.current()) {
+    Logger.debug('[ChatStore] Waiting for the in-flight WS bridge request');
   }
-  wsConnecting = true;
-  try {
+  return wsConnectGate.run(async () => {
     Logger.debug(`[ChatStore] Invoking bridge connect for ${channel} (${provider})`);
     chatConnectStartedAt = performance.now();
     chatFirstFrameLogged = false;
@@ -1090,9 +1095,7 @@ async function connectBridgeForFirstChannel(
     // After first-channel connect, pre-load recent messages (Twitch-only: the
     // badge cache + history backfill don't apply to other providers).
     if (provider === 'twitch') void preloadChannel(channel, channelId);
-  } finally {
-    wsConnecting = false;
-  }
+  });
 }
 
 // Populate the Twitch badge metadata cache for a given channel. Without this,
@@ -2180,6 +2183,12 @@ export async function acquireChannel(
   channelId: string | null,
   provider: ProviderId = 'twitch',
 ): Promise<void> {
+  if (provider === 'itzon') {
+    await invoke<boolean>('itzon_restore_session').catch((error) => {
+      Logger.debug('[itzon] No persisted session to restore before chat connect:', error);
+      return false;
+    });
+  }
   // Twitch keeps bare-login keys (byte-identical to before); non-Twitch sources
   // get a "provider:channel" composite key. MultiChat only.
   const key = provider === 'twitch' ? channel.toLowerCase() : makeKey(provider, channel);
@@ -2208,10 +2217,52 @@ export async function acquireChannel(
   slice.refCount = 1;
   setSlice(key, slice);
 
-  // First channel ever: open the bridge + WS.
+  // First channel ever: open the bridge + WS. Surface the failure on its slice;
+  // without this, an expired Twitch token left a permanent blank pane with no
+  // explanation and no later provider had a way to recover this window's socket.
   if (state.channels.size === 0) {
-    await connectBridgeForFirstChannel(key, channelId, false, provider, channel);
-  } else if (provider === 'twitch') {
+    try {
+      await connectBridgeForFirstChannel(key, channelId, false, provider, channel);
+    } catch (err) {
+      Logger.error(`[ChatStore] initial bridge connect failed for ${key}:`, err);
+      slice.isConnected = false;
+      slice.error = String(err);
+      bumpRevision();
+      throw err;
+    }
+    return;
+  }
+
+  // Another source may have inserted its slice and started the first bridge
+  // attempt before this acquisition ran. Wait for that attempt instead of
+  // racing provider commands against a socket that does not exist yet. If it
+  // failed, this source becomes the recovery owner and opens the shared bridge
+  // through its own provider adapter.
+  const pendingBridge = wsConnectGate.current();
+  if (pendingBridge) {
+    try {
+      await pendingBridge;
+    } catch (err) {
+      Logger.warn(`[ChatStore] prior bridge attempt failed before ${key}; retrying with ${provider}:`, err);
+    }
+  }
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    try {
+      await connectBridgeForFirstChannel(key, channelId, false, provider, channel);
+      slice.isConnected = true;
+      slice.error = null;
+      bumpRevision();
+    } catch (err) {
+      Logger.error(`[ChatStore] bridge recovery failed for ${key}:`, err);
+      slice.isConnected = false;
+      slice.error = String(err);
+      bumpRevision();
+      throw err;
+    }
+    return;
+  }
+
+  if (provider === 'twitch') {
     // Bridge already up. If a Twitch IRC connection is already running (another
     // Twitch slice exists), JOIN onto it. If not - the bridge was opened by a
     // non-Twitch provider first - START the Twitch IRC on the shared bridge,
@@ -2681,8 +2732,10 @@ export function useChannelEmotes(
   useEffect(() => {
     if (!key || !channel) return;
     const unsubscribe = subscribeChannelEmotes(key, () => setVersion((v) => v + 1));
-    // Kick fetches by slug (no channelId needed); Twitch needs the numeric id.
-    if (provider === 'kick' || channelId) void ensureChannelEmotes(channel, channelId ?? '', provider);
+    // Kick and itzon fetch by slug (no channelId needed); Twitch needs the numeric id.
+    if (provider === 'kick' || provider === 'itzon' || channelId) {
+      void ensureChannelEmotes(channel, channelId ?? '', provider);
+    }
     return unsubscribe;
   }, [key, channel, channelId, provider]);
 

@@ -109,6 +109,7 @@ const MultiNookPresets: React.FC = () => {
 
   const openSaveCurrent = useCallback(() => {
     const seed = usemultiNookStore.getState().slots.map((s) => ({
+      provider: s.provider ?? 'twitch',
       channelLogin: s.channelLogin,
       channelId: s.channelId,
       channelName: s.channelName,

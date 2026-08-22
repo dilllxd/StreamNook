@@ -150,6 +150,7 @@ impl StreamServer {
         // a low-latency broadcast, builds the live edge before we return — so the player
         // can read `get_stream_low_latency` and pick the right hls.js mode.
         let upstream = stream_url.clone();
+        let is_itzon = crate::services::itzon_media::is_itzon_hls_url(&upstream);
 
         // Serialize the whole start sequence (TOCTOU guard): without this two
         // concurrent cold starts could both spawn a warp server and both run the
@@ -166,11 +167,15 @@ impl StreamServer {
             reset_ad_state();
             // Bring up the parts-based LL-HLS origin for the new stream (a no-op unless
             // the experimental setting enabled it and the channel is low-latency).
-            let outcome = crate::services::ll_origin::start(upstream).await;
-            log::debug!(
-                "[StreamServer] LL origin start (reuse): active={}",
-                outcome.active
-            );
+            if is_itzon {
+                crate::services::ll_origin::stop();
+            } else {
+                let outcome = crate::services::ll_origin::start(upstream).await;
+                log::debug!(
+                    "[StreamServer] LL origin start (reuse): active={}",
+                    outcome.active
+                );
+            }
             // Return the existing port by parsing it from a static variable
             return Self::get_current_port().await;
         }
@@ -180,8 +185,12 @@ impl StreamServer {
 
         *PROXY_URL.lock().await = Some(stream_url);
         reset_ad_state();
-        let outcome = crate::services::ll_origin::start(upstream).await;
-        log::debug!("[StreamServer] LL origin start: active={}", outcome.active);
+        if is_itzon {
+            crate::services::ll_origin::stop();
+        } else {
+            let outcome = crate::services::ll_origin::start(upstream).await;
+            log::debug!("[StreamServer] LL origin start: active={}", outcome.active);
+        }
 
         // Store the port
         *CURRENT_PORT.lock().await = Some(port);
@@ -245,6 +254,7 @@ impl StreamServer {
         let Some(manifest_url) = proxy_url.lock().await.clone() else {
             return Ok(empty_cors(404));
         };
+        let is_itzon = crate::services::itzon_media::is_itzon_hls_url(&manifest_url);
 
         // Handle CORS Preflight INSTANTLY without hitting Twitch
         if method == warp::http::Method::OPTIONS {
@@ -264,7 +274,7 @@ impl StreamServer {
         // When the origin is live it owns the media playlist, parts, and complete
         // segments (served from memory). This must come before the non-LL stable-URL
         // redirect, which shares the `seg/` prefix.
-        if crate::services::ll_origin::is_active() {
+        if !is_itzon && crate::services::ll_origin::is_active() {
             // Origin-generated init segment (TS transmux path).
             if request_path == "init.mp4" {
                 if let Some(bytes) = crate::services::ll_origin::get_init() {
@@ -341,24 +351,49 @@ impl StreamServer {
         // was stabilized, so the player-visible path never changes even as Twitch
         // re-signs the real URL. Handled before any upstream fetch. The LL origin
         // owns `seg/` when active; this scheme uses a distinct `vseg/` prefix.
-        if let Some((sid, sn)) = crate::services::hls_projection::parse_vseg_path(request_path) {
-            return Ok(match crate::services::hls_projection::redirect_target(&sid, sn) {
-                Some(url) => warp::http::Response::builder()
-                    .status(302)
-                    .header("Location", url)
-                    .header("Access-Control-Allow-Origin", "*")
-                    .header(
-                        "Cache-Control",
-                        "no-cache, no-store, must-revalidate, max-age=0",
-                    )
-                    .body(vec![])
-                    .unwrap(),
-                None => empty_cors(404),
-            });
+        if !is_itzon {
+            if let Some((sid, sn)) = crate::services::hls_projection::parse_vseg_path(request_path)
+            {
+                return Ok(
+                    match crate::services::hls_projection::redirect_target(&sid, sn) {
+                        Some(url) => warp::http::Response::builder()
+                            .status(302)
+                            .header("Location", url)
+                            .header("Access-Control-Allow-Origin", "*")
+                            .header(
+                                "Cache-Control",
+                                "no-cache, no-store, must-revalidate, max-age=0",
+                            )
+                            .body(vec![])
+                            .unwrap(),
+                        None => empty_cors(404),
+                    },
+                );
+            }
         }
 
-        // Map the local path to the upstream Twitch CDN
-        let fetch_url = if request_path == "stream.m3u8" || request_path.is_empty() {
+        // Map the local path to the upstream CDN. Itzon's fMP4 resources carry
+        // a version query that must survive the localhost hop; Twitch instead
+        // inherits the signed query from its resolved manifest URL.
+        let fetch_url = if is_itzon {
+            let mut joined = match reqwest::Url::parse(&manifest_url).and_then(|base| {
+                if request_path == "stream.m3u8" || request_path.is_empty() {
+                    Ok(base)
+                } else {
+                    base.join(request_path)
+                }
+            }) {
+                Ok(joined) => joined,
+                Err(error) => {
+                    error!("[StreamServer] Invalid itzon HLS path: {}", error);
+                    return Ok(empty_cors(400));
+                }
+            };
+            if !raw_query.is_empty() {
+                joined.set_query(Some(&raw_query));
+            }
+            joined.to_string()
+        } else if request_path == "stream.m3u8" || request_path.is_empty() {
             manifest_url.clone()
         } else {
             // Extract query parameters from manifest_url (vital for Twitch auth on variant playlists!)
@@ -390,6 +425,12 @@ impl StreamServer {
         };
 
         let status = response.status();
+        let upstream_content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("application/octet-stream")
+            .to_string();
         let mut bytes = match response.bytes().await {
             Ok(b) => b.to_vec(),
             Err(e) => {
@@ -412,7 +453,14 @@ impl StreamServer {
         // rides at its cushion instead of being forced several seconds back. The
         // parts-based low-latency origin (when enabled) owns its own playlist and never
         // reaches here.
-        if !request_path.ends_with(".ts") {
+        let is_playlist = request_path == "stream.m3u8"
+            || request_path.ends_with(".m3u8")
+            || upstream_content_type
+                .to_ascii_lowercase()
+                .contains("mpegurl")
+            || bytes.starts_with(b"#EXTM3U");
+
+        if is_playlist && !is_itzon {
             if let Ok(text) = std::str::from_utf8(&bytes) {
                 detect_ads_in_playlist(text);
                 // Lower the over-declared TARGETDURATION, then (LIVE only) pin every
@@ -439,11 +487,10 @@ impl StreamServer {
             }
         }
 
-        // Determine content-type (chunks are video/MP2T, playlists are x-mpegURL)
-        let content_type = if request_path.ends_with(".ts") {
-            "video/MP2T"
-        } else {
+        let content_type = if is_playlist {
             "application/x-mpegURL"
+        } else {
+            upstream_content_type.as_str()
         };
 
         Ok(warp::http::Response::builder()

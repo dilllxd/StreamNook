@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { TwitchStream } from '../../types';
 import { useAppStore } from '../../stores/AppStore';
 import { Logger } from '../../utils/logger';
+import type { ProviderId } from '../../types/providers';
 
 /** Raw shape returned by the `search_channels` Tauri command. The endpoint is
  *  loosely typed (different Twitch surfaces fill different fields), so every key
@@ -29,6 +30,8 @@ export interface ChannelItem {
   isLive: boolean;
   gameName?: string;
   source: 'following' | 'search';
+  provider?: ProviderId;
+  viewerCount?: number;
 }
 
 export const DEFAULT_AVATAR =
@@ -51,6 +54,7 @@ export function streamToItem(s: TwitchStream): ChannelItem {
     isLive: true, // followed-streams endpoint only returns live channels
     gameName: s.game_name,
     source: 'following',
+    provider: 'twitch',
   };
 }
 
@@ -64,6 +68,7 @@ export function resultToItem(r: ChannelSearchResult): ChannelItem {
     isLive: !!r.is_live,
     gameName: r.game_name,
     source: 'search',
+    provider: 'twitch',
   };
 }
 
@@ -76,7 +81,7 @@ export function resultToItem(r: ChannelSearchResult): ChannelItem {
  * The caller owns panel open/close, focus, and what happens on select. This
  * hook is purely the data + navigation layer so the two surfaces stay identical.
  */
-export function useChannelSearch(excludeLogins: Set<string>) {
+export function useChannelSearch(excludeLogins: Set<string>, enabled = true) {
   const followedStreams = useAppStore((s) => s.followedStreams);
   const loadFollowedStreams = useAppStore((s) => s.loadFollowedStreams);
 
@@ -92,6 +97,7 @@ export function useChannelSearch(excludeLogins: Set<string>) {
 
   // Online following, instantly filtered against the typed query (no network round-trip).
   const followingItems = useMemo(() => {
+    if (!enabled) return [];
     const items = followedStreams
       .map(streamToItem)
       .filter((it) => !excludeLogins.has(it.login.toLowerCase()));
@@ -102,10 +108,11 @@ export function useChannelSearch(excludeLogins: Set<string>) {
         it.displayName.toLowerCase().includes(query) ||
         (it.gameName || '').toLowerCase().includes(query),
     );
-  }, [followedStreams, excludeLogins, query]);
+  }, [enabled, followedStreams, excludeLogins, query]);
 
   // Twitch search results, minus anything excluded or already shown as a live follow.
   const searchItems = useMemo(() => {
+    if (!enabled) return [];
     const followingLogins = new Set(followingItems.map((it) => it.login.toLowerCase()));
     return searchResults
       .map(resultToItem)
@@ -115,7 +122,7 @@ export function useChannelSearch(excludeLogins: Set<string>) {
           !excludeLogins.has(it.login.toLowerCase()) &&
           !followingLogins.has(it.login.toLowerCase()),
       );
-  }, [searchResults, followingItems, excludeLogins]);
+  }, [enabled, searchResults, followingItems, excludeLogins]);
 
   // Flat list backing keyboard navigation (following first, then search).
   const visibleItems = useMemo(() => [...followingItems, ...searchItems], [followingItems, searchItems]);
@@ -133,6 +140,12 @@ export function useChannelSearch(excludeLogins: Set<string>) {
 
   // Debounced Twitch search, only fires while there's a query; the live list above stays instant.
   useEffect(() => {
+    if (!enabled) {
+      setSearchResults([]);
+      setIsSearching(false);
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+      return;
+    }
     if (!query) {
       setSearchResults([]);
       setIsSearching(false);
@@ -158,7 +171,7 @@ export function useChannelSearch(excludeLogins: Set<string>) {
     return () => {
       if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     };
-  }, [searchInput, query]);
+  }, [enabled, searchInput, query]);
 
   const reset = useCallback(() => {
     setSearchInput('');

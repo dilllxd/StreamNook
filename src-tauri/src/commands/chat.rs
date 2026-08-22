@@ -312,6 +312,42 @@ pub async fn get_kick_channel_emotes(slug: String) -> crate::services::emote_ser
     crate::services::providers::kick_emotes::channel_emote_set(&slug).await
 }
 
+/// Opens itzon's own login page in an isolated profile. Credentials stay inside
+/// the site; the native chat adapter receives only the confirmed session.
+#[tauri::command]
+pub async fn itzon_connect() -> Result<(), String> {
+    crate::services::itzon_auth_service::connect()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn itzon_disconnect() {
+    crate::services::itzon_auth_service::disconnect().await;
+}
+
+#[tauri::command]
+pub fn itzon_is_connected() -> bool {
+    crate::services::itzon_auth_service::is_connected()
+}
+
+#[tauri::command]
+pub async fn itzon_restore_session() -> bool {
+    crate::services::itzon_auth_service::restore().await
+}
+
+#[tauri::command]
+pub fn itzon_account_name() -> Option<String> {
+    crate::services::itzon_auth_service::account_name()
+}
+
+/// itzon's global and channel-specific 7TV set for chat rendering, picker, and
+/// tab completion. The channel's Twitch identity is resolved from itzon itself.
+#[tauri::command]
+pub async fn get_itzon_channel_emotes(slug: String) -> crate::services::emote_service::EmoteSet {
+    crate::services::providers::itzon_emotes::channel_emote_set(&slug).await
+}
+
 #[tauri::command]
 pub async fn stop_chat() -> Result<(), String> {
     ChatService::stop().await.map_err(|e| e.to_string())

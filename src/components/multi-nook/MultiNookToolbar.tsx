@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useDroppable, useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { usemultiNookStore } from '../../stores/multiNookStore';
@@ -10,6 +10,11 @@ import { useAppStore } from '../../stores/AppStore';
 import { ChannelItem, useChannelSearch } from './channelSearch';
 import { ChannelResultRow } from './ChannelResultRow';
 import MultiNookPresets from './MultiNookPresets';
+import type { ProviderId } from '../../types/providers';
+import { getItzonExplore, itzonAvatarUrl } from '../../services/itzon';
+import { Logger } from '../../utils/logger';
+import { ProviderLogo } from '../ProviderLogo';
+import { PROVIDERS } from '../../types/providers';
 
 interface MultiNookToolbarProps {
   isDragging?: boolean;
@@ -38,41 +43,90 @@ const MultiNookToolbar: React.FC<MultiNookToolbarProps> = ({
   // --- Add Channel Search (collapsible panel) ---
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<Extract<ProviderId, 'twitch' | 'itzon'>>('twitch');
+  const [itzonStreams, setItzonStreams] = useState<ChannelItem[]>([]);
+  const [isItzonLoading, setIsItzonLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
   // Channels already in the grid, excluded from every list so you can't add a
   // duplicate. Left unmemoized: the React Compiler auto-memoizes it, and a manual
   // useMemo here can't be preserved once it's passed into the search hook.
-  const existingLogins = new Set(slots.map((s) => s.channelLogin.toLowerCase()));
+  const existingLogins = new Set(
+    slots
+      .filter((slot) => (slot.provider ?? 'twitch') === selectedProvider)
+      .map((slot) => slot.channelLogin.toLowerCase()),
+  );
 
   // Shared finder: live following + debounced Twitch search + keyboard navigation.
   const {
     searchInput,
     setSearchInput,
     query,
-    isSearching,
+    isSearching: isTwitchSearching,
     followingItems,
     searchItems,
-    visibleItems,
+    visibleItems: twitchVisibleItems,
     followedCount,
     highlightIndex,
     setHighlightIndex,
     listRef,
     refreshFollowing,
     reset: resetSearch,
-  } = useChannelSearch(existingLogins);
+  } = useChannelSearch(existingLogins, selectedProvider === 'twitch');
+
+  const refreshItzon = useCallback(async () => {
+    setIsItzonLoading(true);
+    try {
+      const explore = await getItzonExplore();
+      setItzonStreams(
+        explore.streams.map((stream) => ({
+          id: `itzon:${stream.username.toLowerCase()}`,
+          login: stream.username.toLowerCase(),
+          displayName: stream.username,
+          avatarUrl: itzonAvatarUrl(stream.username),
+          isLive: true,
+          gameName: stream.category || undefined,
+          source: 'search',
+          provider: 'itzon',
+          viewerCount: stream.viewers,
+        })),
+      );
+    } catch (error) {
+      Logger.warn('[MultiNook] Failed to load itzon live channels', error);
+      setItzonStreams([]);
+    } finally {
+      setIsItzonLoading(false);
+    }
+  }, []);
+
+  const itzonItems = useMemo(() => {
+    const normalizedQuery = searchInput.trim().toLowerCase();
+    return itzonStreams.filter((item) => {
+      if (existingLogins.has(item.login)) return false;
+      if (!normalizedQuery) return true;
+      return (
+        item.login.includes(normalizedQuery) ||
+        item.displayName.toLowerCase().includes(normalizedQuery) ||
+        (item.gameName || '').toLowerCase().includes(normalizedQuery)
+      );
+    });
+  }, [existingLogins, itzonStreams, searchInput]);
+
+  const visibleItems = selectedProvider === 'itzon' ? itzonItems : twitchVisibleItems;
+  const isSearching = selectedProvider === 'itzon' ? isItzonLoading : isTwitchSearching;
 
   // Focus input when the panel opens, and refresh the live-following list so it's
   // current the moment the panel appears.
   useEffect(() => {
     if (isSearchOpen) {
-      refreshFollowing();
+      if (selectedProvider === 'twitch') refreshFollowing();
+      else void refreshItzon();
       // Small delay for the expand animation to start
       const t = setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 80);
       return () => clearTimeout(t);
     }
-  }, [isSearchOpen, refreshFollowing]);
+  }, [isSearchOpen, selectedProvider, refreshFollowing, refreshItzon]);
 
   const closeSearch = () => {
     setIsSearchOpen(false);
@@ -97,7 +151,7 @@ const MultiNookToolbar: React.FC<MultiNookToolbarProps> = ({
   const handleSelectItem = async (item: ChannelItem) => {
     if (!item.login) return;
     setIsAdding(true);
-    await addSlot(item.login);
+    await addSlot(item.login, selectedProvider);
     closeSearch();
     setIsAdding(false);
   };
@@ -125,7 +179,7 @@ const MultiNookToolbar: React.FC<MultiNookToolbarProps> = ({
       } else if (searchInput.trim() && !isSearching) {
         // Fallback: add the raw text as a login (exact channel not surfaced by search)
         setIsAdding(true);
-        await addSlot(searchInput.trim());
+        await addSlot(searchInput.trim(), selectedProvider);
         closeSearch();
         setIsAdding(false);
       }
@@ -266,52 +320,20 @@ const MultiNookToolbar: React.FC<MultiNookToolbarProps> = ({
         <div className="flex items-center gap-3 relative z-30">
           {/* Add Stream — Collapsible search */}
           <div ref={searchContainerRef} className="relative">
-            <div className={`
-              flex items-center rounded-full transition-all duration-300 overflow-hidden
-              ${isSearchOpen
-                ? 'w-56 glass-input'
-                : 'w-8 h-8 glass-button group cursor-pointer text-textSecondary hover:text-white'
-              }
-            `}>
-              {isSearchOpen ? (
-                <>
-                  <input
-                    ref={inputRef}
-                    type="text"
-                    value={searchInput}
-                    onChange={(e) => setSearchInput(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    placeholder="Search or pick a live channel..."
-                    className="bg-transparent border-none text-sm text-textPrimary placeholder:text-textMuted flex-1 px-3 py-1.5 outline-none h-8"
-                    disabled={isAdding || slots.length >= 25}
-                  />
-                  {isSearching ? (
-                    <div className="pr-2 flex items-center">
-                      <Loader2 size={14} className="text-accent animate-spin" />
-                    </div>
-                  ) : searchInput && (
-                    <button
-                      onClick={closeSearch}
-                      className="pr-2 text-textMuted hover:text-textPrimary transition-colors"
-                    >
-                      <X size={14} />
-                    </button>
-                  )}
-                </>
-              ) : (
-                <Tooltip content="Add Stream" delay={200} side="bottom">
-                  <button
-                    onClick={() => {
-                      if (slots.length < 25) setIsSearchOpen(true);
-                    }}
-                    disabled={slots.length >= 25}
-                    className="w-full h-full flex items-center justify-center transition-colors disabled:opacity-40"
-                  >
-                    <Plus size={16} />
-                  </button>
-                </Tooltip>
-              )}
-            </div>
+            <Tooltip content="Add Stream" delay={200} side="bottom">
+              <button
+                onClick={() => {
+                  if (slots.length < 25) setIsSearchOpen((open) => !open);
+                }}
+                disabled={slots.length >= 25 || isAdding}
+                aria-expanded={isSearchOpen}
+                className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors disabled:opacity-40 ${
+                  isSearchOpen ? 'glass-button-active text-textPrimary' : 'glass-button text-textSecondary hover:text-white'
+                }`}
+              >
+                {isAdding ? <Loader2 size={15} className="animate-spin" /> : <Plus size={16} />}
+              </button>
+            </Tooltip>
 
             {/* Smart list — live following on open, instant filter + Twitch search while typing */}
             {isSearchOpen && (
@@ -320,13 +342,88 @@ const MultiNookToolbar: React.FC<MultiNookToolbarProps> = ({
                     over the (bright) video grid with no dimming scrim, where the glass-strength
                     tint alone reads as see-through. */}
                 <div
-                  className="liquid-glass-panel overflow-hidden"
+                  className="liquid-glass-panel overflow-hidden rounded-md border border-borderSubtle"
                   style={{ backgroundColor: 'rgba(16, 16, 20, 0.92)' }}
                 >
+                  <div className="grid grid-cols-2 border-b border-borderSubtle" role="tablist" aria-label="Stream provider">
+                    {(['twitch', 'itzon'] as const).map((provider) => {
+                      const active = selectedProvider === provider;
+                      return (
+                        <button
+                          key={provider}
+                          role="tab"
+                          aria-selected={active}
+                          onClick={() => {
+                            setSelectedProvider(provider);
+                            setSearchInput('');
+                            setHighlightIndex(0);
+                          }}
+                          className={`h-9 flex items-center justify-center gap-2 text-xs font-semibold transition-colors ${
+                            active ? 'bg-white/[0.055] text-textPrimary' : 'text-textMuted hover:text-textPrimary hover:bg-white/[0.025]'
+                          }`}
+                        >
+                          <ProviderLogo provider={provider} size={12} />
+                          {PROVIDERS[provider].label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="p-2 border-b border-borderSubtle">
+                    <div className="h-8 flex items-center gap-2 rounded-md border border-borderSubtle bg-black/20 px-2.5 focus-within:border-white/20">
+                      <Search size={13} className="text-textMuted shrink-0" />
+                      <input
+                        ref={inputRef}
+                        type="text"
+                        value={searchInput}
+                        onChange={(event) => setSearchInput(event.target.value)}
+                        onKeyDown={handleKeyDown}
+                        placeholder="Search channels"
+                        className="min-w-0 flex-1 bg-transparent border-none text-xs text-textPrimary placeholder:text-textMuted outline-none"
+                        disabled={isAdding || slots.length >= 25}
+                      />
+                      {isSearching ? (
+                        <Loader2 size={13} className="text-textMuted animate-spin shrink-0" />
+                      ) : searchInput ? (
+                        <button
+                          onClick={() => setSearchInput('')}
+                          className="text-textMuted hover:text-textPrimary transition-colors"
+                          aria-label="Clear search"
+                        >
+                          <X size={13} />
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+
                   <div ref={listRef} className="max-h-80 overflow-y-auto custom-scrollbar p-1.5">
 
+                    {selectedProvider === 'itzon' && itzonItems.length > 0 && (
+                      <>
+                        <div className="px-2.5 pt-1.5 pb-1 flex items-center gap-1.5">
+                          <ProviderLogo provider="itzon" size={11} />
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-textMuted">
+                            Live on ITZON
+                          </span>
+                        </div>
+                        <div className="space-y-0.5">
+                          {itzonItems.map((item, index) => (
+                            <ChannelResultRow
+                              key={item.id}
+                              item={item}
+                              index={index}
+                              highlighted={highlightIndex === index}
+                              disabled={isAdding}
+                              onSelect={handleSelectItem}
+                              onHover={setHighlightIndex}
+                            />
+                          ))}
+                        </div>
+                      </>
+                    )}
+
                     {/* Live following (instant, from cache) */}
-                    {followingItems.length > 0 && (
+                    {selectedProvider === 'twitch' && followingItems.length > 0 && (
                       <>
                         <div className="px-2.5 pt-1.5 pb-1 flex items-center gap-1.5">
                           <Radio size={11} className="text-red-500" />
@@ -351,7 +448,7 @@ const MultiNookToolbar: React.FC<MultiNookToolbarProps> = ({
                     )}
 
                     {/* Twitch search (debounced) — only while typing */}
-                    {query && (searchItems.length > 0 || isSearching) && (
+                    {selectedProvider === 'twitch' && query && (searchItems.length > 0 || isSearching) && (
                       <>
                         <div className="px-2.5 pt-2 pb-1 flex items-center gap-1.5">
                           <Search size={11} className="text-textMuted" />
@@ -381,23 +478,25 @@ const MultiNookToolbar: React.FC<MultiNookToolbarProps> = ({
 
                     {/* Empty states */}
                     {visibleItems.length === 0 && (
-                      query ? (
-                        isSearching ? (
-                          <div className="px-4 py-5 flex items-center justify-center gap-2.5">
-                            <Loader2 size={14} className="text-accent animate-spin" />
-                            <span className="text-xs text-textSecondary font-medium">Searching Twitch...</span>
-                          </div>
-                        ) : (
+                      isSearching ? (
+                        <div className="px-4 py-5 flex items-center justify-center gap-2.5">
+                          <Loader2 size={14} className="text-accent animate-spin" />
+                          <span className="text-xs text-textSecondary font-medium">
+                            {selectedProvider === 'itzon' ? 'Loading itzon...' : 'Searching Twitch...'}
+                          </span>
+                        </div>
+                      ) : query ? (
                           <div className="px-4 py-5 text-center">
                             <span className="text-xs text-textMuted">No channels found for "{searchInput}"</span>
                           </div>
-                        )
                       ) : (
                         <div className="px-4 py-5 text-center">
                           <span className="text-xs text-textMuted">
-                            {followedCount === 0
-                              ? 'No followed channels are live. Type to search.'
-                              : 'Start typing to search any channel'}
+                            {selectedProvider === 'itzon'
+                              ? 'No public itzon streams are live.'
+                              : followedCount === 0
+                                ? 'No followed channels are live. Type to search.'
+                                : 'Start typing to search any channel'}
                           </span>
                         </div>
                       )

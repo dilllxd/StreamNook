@@ -1,4 +1,5 @@
 use crate::models::settings::AppState;
+use crate::services::itzon_media;
 use crate::services::multi_nook_server::MultiNookServer;
 use crate::services::twitch_resolver as tr;
 use log::debug;
@@ -18,6 +19,15 @@ fn channel_from_url(url: &str) -> Option<String> {
     Some(seg.to_lowercase())
 }
 
+fn itzon_channel_from_url(url: &str) -> Option<String> {
+    let after = url.split("itzon.tv/").nth(1)?;
+    let seg = after.split(['/', '?', '#']).next()?.trim();
+    if seg.is_empty() {
+        return None;
+    }
+    Some(seg.to_lowercase())
+}
+
 /// Start a stream for multi-stream mode. Each tile resolves natively (same
 /// pipeline as the solo player) and gets its own proxy server.
 #[tauri::command]
@@ -25,11 +35,13 @@ pub async fn start_multi_nook(
     stream_id: String,
     url: String,
     quality: String,
+    provider: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
+    let provider = provider.unwrap_or_else(|| "twitch".to_string());
     debug!(
-        "[MultiNook] start_multi_nook called: id='{}', url='{}', quality='{}'",
-        stream_id, url, quality
+        "[MultiNook] start_multi_nook called: id='{}', provider='{}', url='{}', quality='{}'",
+        stream_id, provider, url, quality
     );
 
     let current_count = MultiNookServer::active_count().await;
@@ -38,6 +50,35 @@ pub async fn start_multi_nook(
             "Maximum of {} concurrent streams reached",
             MAX_STREAMS
         ));
+    }
+
+    itzon_media::stop_heartbeat(&stream_id).await;
+
+    if provider == "itzon" {
+        let channel = itzon_channel_from_url(&url)
+            .ok_or_else(|| format!("Unrecognized itzon URL: {}", url))?;
+        let playback = itzon_media::resolve_hls(&channel)
+            .await
+            .map_err(|error| error.to_string())?;
+        let port = MultiNookServer::start_proxy(&stream_id, playback.hls_url.clone())
+            .await
+            .map_err(|error| error.to_string())?;
+        itzon_media::start_heartbeat(&stream_id, &playback).await;
+
+        let proxy_url = format!(
+            "http://localhost:{}/stream.m3u8?t={}",
+            port,
+            chrono::Utc::now().timestamp_millis()
+        );
+        debug!(
+            "[MultiNook] '{}' itzon:{} → {}",
+            stream_id, playback.channel, proxy_url
+        );
+        return Ok(proxy_url);
+    }
+
+    if provider != "twitch" {
+        return Err(format!("Playback provider '{}' is not supported", provider));
     }
 
     let stream_timeout = { state.settings.lock().unwrap().streamlink.stream_timeout };
@@ -97,6 +138,7 @@ pub async fn start_multi_nook(
 #[tauri::command]
 pub async fn stop_multi_nook(stream_id: String) -> Result<(), String> {
     debug!("[MultiNook] Stopping stream: {}", stream_id);
+    itzon_media::stop_heartbeat(&stream_id).await;
     MultiNookServer::stop_instance(&stream_id)
         .await
         .map_err(|e| e.to_string())
@@ -106,6 +148,7 @@ pub async fn stop_multi_nook(stream_id: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn stop_all_multi_nooks() -> Result<(), String> {
     debug!("[MultiNook] Stopping all multi-stream instances");
+    itzon_media::stop_all_heartbeats_except(crate::services::stream_server::SOLO_STREAM_ID).await;
     MultiNookServer::stop_all().await.map_err(|e| e.to_string())
 }
 

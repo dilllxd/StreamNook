@@ -53,6 +53,7 @@ import TwitchOverlay from './components/TwitchOverlay';
 import ErrorBoundary from './components/ErrorBoundary';
 import { StreamContextMenu } from './components/StreamContextMenu';
 import ModerationDragLayer from './components/chat/ModerationDragLayer';
+import { makeKey } from './utils/providerKey';
 import { listen } from '@tauri-apps/api/event';
 import { applyModerateEvent } from './utils/applyModerateEvent';
 import { handleSeventvEmoteSetUpdate, handleSeventvCosmeticUpdate, type EmoteSetUpdatePayload, type CosmeticUpdatePayload } from './services/seventvEventApi';
@@ -169,11 +170,16 @@ function App() {
   const currentStream = useAppStore((s) => s.currentStream);
   // Watch-reward inputs: the watched channel + its (live-updating) category, so
   // event-reward claims can fire the moment a streamer switches categories.
-  const watchRewardChannel = currentStream?.user_login ?? null;
-  const watchRewardGame = currentStream?.game_name ?? null;
+  const currentProvider = currentStream?.provider ?? 'twitch';
+  const watchRewardChannel = currentProvider === 'twitch' ? currentStream?.user_login ?? null : null;
+  const watchRewardGame = currentProvider === 'twitch' ? currentStream?.game_name ?? null : null;
   const activeChatChannelInPopout = !!(
     currentStream?.user_login &&
-    channelsInPopouts.has(currentStream.user_login.toLowerCase())
+    channelsInPopouts.has(
+      currentProvider === 'twitch'
+        ? currentStream.user_login.toLowerCase()
+        : makeKey(currentProvider, currentStream.user_login),
+    )
   );
 
   const [chatSize, setChatSize] = useState(chatPlacement === 'bottom' ? DEFAULT_CHAT_HEIGHT : DEFAULT_CHAT_WIDTH);
@@ -1740,7 +1746,7 @@ function App() {
                   className={`flex flex-1 h-full overflow-hidden relative ${chatPlacement === 'bottom' ? 'flex-col' : 'flex-row'}`}
                 >
                   <ChannelAboutReveal
-                    enabled={!isMultiNookActive && (currentMediaType === 'live' || currentMediaType === 'video' || currentMediaType === 'offline_chat') && !!currentStream?.user_login}
+                    enabled={!isMultiNookActive && currentProvider === 'twitch' && (currentMediaType === 'live' || currentMediaType === 'video' || currentMediaType === 'offline_chat') && !!currentStream?.user_login}
                     channelLogin={currentStream?.user_login}
                   >
                     <AnimatePresence mode="wait">

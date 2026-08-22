@@ -959,7 +959,10 @@ impl ChannelPointsWebSocketService {
 
         let poll_id = poll.get("poll_id").and_then(|v| v.as_str()).unwrap_or("");
         let title = poll.get("title").and_then(|v| v.as_str()).unwrap_or("");
-        let status = poll.get("status").and_then(|v| v.as_str()).unwrap_or("ACTIVE");
+        let status = poll
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("ACTIVE");
         let duration_seconds = poll
             .get("duration_seconds")
             .and_then(|v| v.as_i64())
@@ -968,13 +971,19 @@ impl ChannelPointsWebSocketService {
             .get("remaining_duration_milliseconds")
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
-        let total_voters = poll.get("total_voters").and_then(|v| v.as_i64()).unwrap_or(0);
+        let total_voters = poll
+            .get("total_voters")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
         let total_votes = poll
             .get("votes")
             .and_then(|v| v.get("total"))
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
-        let started_at = poll.get("started_at").and_then(|v| v.as_str()).unwrap_or("");
+        let started_at = poll
+            .get("started_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
         // Poll-level vote settings (whether bits/channel-points voting is on).
         let channel_points_voting = poll["settings"]["channel_points_votes"]["is_enabled"]
@@ -989,14 +998,20 @@ impl ChannelPointsWebSocketService {
         let mut choices: Vec<Value> = Vec::new();
         if let Some(arr) = poll.get("choices").and_then(|v| v.as_array()) {
             for choice in arr {
-                let id = choice.get("choice_id").and_then(|v| v.as_str()).unwrap_or("");
+                let id = choice
+                    .get("choice_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 let choice_title = choice.get("title").and_then(|v| v.as_str()).unwrap_or("");
                 let votes = choice
                     .get("votes")
                     .and_then(|v| v.get("total"))
                     .and_then(|v| v.as_i64())
                     .unwrap_or(0);
-                let voters = choice.get("total_voters").and_then(|v| v.as_i64()).unwrap_or(0);
+                let voters = choice
+                    .get("total_voters")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
                 choices.push(json!({
                     "id": id,
                     "title": choice_title,

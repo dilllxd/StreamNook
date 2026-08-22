@@ -1,3 +1,5 @@
+import type { ProviderId } from './providers';
+
 export interface AudioBoostSettings {
   enabled: boolean;
   gain: number; // Makeup gain multiplier applied after compression (1 = unity)
@@ -616,8 +618,9 @@ export interface CustomTheme {
 
 export interface MultiNookSlot {
   id: string;             // Unique identifier for the slot (e.g., cell-1)
-  channelLogin: string;   // The Twitch channel login name
-  channelId?: string;     // The Twitch user ID for chat connection mapping
+  provider?: ProviderId;  // Missing on legacy settings means Twitch
+  channelLogin: string;   // Provider-local channel login name
+  channelId?: string;     // Provider-local channel/user ID for chat mapping
   channelName?: string;   // The capitalization-correct display name
   volume: number;         // 0.0 to 1.0
   muted: boolean;         // Mute state
@@ -636,8 +639,9 @@ export interface MultiNookSlot {
  *  of MultiNookSlot. A preset records *which* channels to open, not transient
  *  view state (volume/mute/focus/minimize), which is re-derived on load. */
 export interface MultiNookPresetChannel {
-  channelLogin: string;      // The Twitch channel login name (canonical key)
-  channelId?: string;        // Twitch user ID, cached for instant chat mapping on load
+  provider?: ProviderId;     // Missing on legacy presets means Twitch
+  channelLogin: string;      // Provider-local login name (canonical within provider)
+  channelId?: string;        // Provider-local user ID, cached for instant chat mapping on load
   channelName?: string;      // Capitalization-correct display name for the preset UI
   profileImageUrl?: string;  // Cached avatar so preset rows render without a network hit
   quality?: string;          // Preferred Streamlink quality carried into the loaded tile
@@ -870,6 +874,8 @@ export interface ReleaseNotes {
 }
 
 export interface TwitchStream {
+  /** Source platform. Absent means Twitch for backwards compatibility. */
+  provider?: import('./providers').ProviderId;
   id: string;
   user_id: string;
   user_name: string;

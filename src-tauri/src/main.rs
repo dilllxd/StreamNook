@@ -30,13 +30,11 @@ use commands::{
     accounts::*, announcements::*, app::*, automation::*, badge_metadata::*, badge_service::*,
     badges::*, cache::*, channel_panels::*, chat::*, chat_identity::*, components::*,
     cosmetics_cache::*, diagnostic_logging::*, discord::*, drops::*, emoji::*, emote_prefetch::*,
-    emotes::*, eventsub::*, ffz::*, hype_train::*, identity::*, justlog::*, layout::*,
+    emotes::*, eventsub::*, ffz::*, hype_train::*, identity::*, itzon::*, justlog::*, layout::*,
     link_preview::*, logs::*, mod_log_storage::*, modroom::*, multi_nook::*, plugins::*,
-    profile_cache::*,
-    resub::*, screen_capture::*, session::*, settings::*, seventv::*, seventv_cosmetics::*,
-    seventv_cosmetics_fetch::*, song_id::*, streaming::*, subscriptions::*, twitch::*,
-    universal_cache::*,
-    user_profile::*, watch_streak::*, whisper_storage::*,
+    profile_cache::*, resub::*, screen_capture::*, session::*, settings::*, seventv::*,
+    seventv_cosmetics::*, seventv_cosmetics_fetch::*, song_id::*, streaming::*, subscriptions::*,
+    twitch::*, universal_cache::*, user_profile::*, watch_streak::*, whisper_storage::*,
 };
 use log::{debug, error};
 use models::settings::{AppState, CloseToTrayMode, Settings};
@@ -136,12 +134,12 @@ fn show_main_window(app: &tauri::AppHandle) {
     };
     match tauri::WebviewWindowBuilder::new(app, "main", app_url)
         .title("StreamNook")
-    .inner_size(1600.0, 1000.0)
-    .min_inner_size(800.0, 600.0)
-    .center()
-    .resizable(true)
-    .decorations(false)
-    .build()
+        .inner_size(1600.0, 1000.0)
+        .min_inner_size(800.0, 600.0)
+        .center()
+        .resizable(true)
+        .decorations(false)
+        .build()
     {
         Ok(win) => {
             debug!("[Main] Recreated main window on demand");
@@ -861,6 +859,9 @@ fn main() {
             stop_multi_nook,
             stop_all_multi_nooks,
             get_active_multi_nooks,
+            get_itzon_explore,
+            get_itzon_channel,
+            get_itzon_following,
             register_active_channel,
             unregister_active_channel,
             // Chat commands
@@ -882,6 +883,11 @@ fn main() {
             get_youtube_channel_meta,
             get_tiktok_channel_meta,
             youtube_connect,
+            itzon_connect,
+            itzon_disconnect,
+            itzon_is_connected,
+            itzon_restore_session,
+            itzon_account_name,
             youtube_disconnect,
             youtube_is_connected,
             youtube_account_name,
@@ -897,6 +903,7 @@ fn main() {
             kick_unban_user,
             kick_delete_message,
             get_kick_channel_emotes,
+            get_itzon_channel_emotes,
             load_mod_logs,
             append_mod_log,
             clear_mod_logs,

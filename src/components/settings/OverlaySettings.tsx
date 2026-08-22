@@ -120,6 +120,7 @@ function parseTikTokInput(input: string): string | null {
 
 const SOURCE_PLACEHOLDER: Record<ProviderId, string> = {
   twitch: 'Twitch login (e.g. sodapoppin)',
+  itzon: 'itzon channel (e.g. zeenote)',
   kick: 'Kick channel (e.g. trainwreckstv)',
   youtube: 'YouTube channel or link (e.g. mrbeast)',
   tiktok: 'TikTok @handle or LIVE link',

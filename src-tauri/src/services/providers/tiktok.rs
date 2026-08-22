@@ -173,7 +173,12 @@ impl ChatProvider for TikTokProvider {
         Ok(())
     }
 
-    async fn send(&self, _channel: &str, _text: &str, _reply_to: Option<&str>) -> Result<SendOutcome> {
+    async fn send(
+        &self,
+        _channel: &str,
+        _text: &str,
+        _reply_to: Option<&str>,
+    ) -> Result<SendOutcome> {
         // Sending to TikTok LIVE from outside the app is ban-risk, so v1 is read-only.
         Ok(SendOutcome {
             message_id: None,
@@ -209,7 +214,9 @@ fn friendly_resolve_error(e: &tiktok_live::errors::TikTokLiveError) -> String {
     use tiktok_live::errors::TikTokLiveError as E;
     match e {
         E::UserNotFound(u) => format!("@{} not found on TikTok", u),
-        E::HostNotOnline(_) | E::RoomIdMissing => "This TikTok creator isn't live right now".to_string(),
+        E::HostNotOnline(_) | E::RoomIdMissing => {
+            "This TikTok creator isn't live right now".to_string()
+        }
         E::AgeRestricted(_) => "This TikTok LIVE is age-restricted".to_string(),
         other => format!("Couldn't connect to TikTok LIVE: {}", other),
     }
@@ -366,7 +373,11 @@ fn build_gift_message(m: &WebcastGiftMessage, channel_key: &str) -> Option<ChatM
     } else {
         format!("sent {}", gift_name)
     };
-    let diamond_text = format!("{} diamond{}", diamonds, if diamonds == 1 { "" } else { "s" });
+    let diamond_text = format!(
+        "{} diamond{}",
+        diamonds,
+        if diamonds == 1 { "" } else { "s" }
+    );
     let system = format!("{} ({})", phrase, diamond_text);
     // Lead with the gift's own (often animated) icon so chat shows WHICH gift it is.
     let mut segments = Vec::new();
@@ -396,7 +407,8 @@ fn build_gift_message(m: &WebcastGiftMessage, channel_key: &str) -> Option<ChatM
         Some(("tiktok_gift", system)),
     );
     msg.tags.insert("tt-gift-name".to_string(), gift_name);
-    msg.tags.insert("tt-gift-count".to_string(), count.to_string());
+    msg.tags
+        .insert("tt-gift-count".to_string(), count.to_string());
     msg.tags
         .insert("tt-gift-diamonds".to_string(), diamonds.to_string());
     if let Some(url) = icon_url {
@@ -437,7 +449,9 @@ fn build_like_message(m: &WebcastLikeMessage, channel_key: &str) -> Option<ChatM
     if sample(&LIKE_SAMPLES, 20) {
         log::info!(
             "[TikTok][like] from='{}' like_count={} total_like={}",
-            user.nickname, m.like_count, m.total_like_count,
+            user.nickname,
+            m.like_count,
+            m.total_like_count,
         );
     }
     let uid = user.user_id;
@@ -637,7 +651,9 @@ fn update_viewers(id_lc: &str, m: &WebcastRoomUserSeqMessage) {
     if sample(&SEQ_SAMPLES, 10) {
         log::info!(
             "[TikTok][seq] viewer_count={} total_user={} popularity={}",
-            m.viewer_count, m.total_user, m.popularity,
+            m.viewer_count,
+            m.total_user,
+            m.popularity,
         );
     }
     // `viewer_count` is the CURRENT concurrent viewers. `total_user` is cumulative
@@ -658,7 +674,10 @@ fn update_viewers(id_lc: &str, m: &WebcastRoomUserSeqMessage) {
 /// `get_tiktok_channel_meta` command for the chat chrome.
 pub fn channel_meta(identifier: &str) -> Option<TikTokChannelMeta> {
     let id_lc = clean_handle(identifier).to_lowercase();
-    tt_meta_cache().lock().ok().and_then(|m| m.get(&id_lc).cloned())
+    tt_meta_cache()
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&id_lc).cloned())
 }
 
 /// Enrich the chrome from the profile page (avatar / name / numeric id) + the

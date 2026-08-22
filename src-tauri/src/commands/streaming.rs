@@ -1,5 +1,6 @@
 use crate::models::settings::AppState;
 use crate::services::auth_proxy;
+use crate::services::itzon_media;
 use crate::services::stream_server::StreamServer;
 use crate::services::twitch_resolver as tr;
 use log::debug;
@@ -128,6 +129,15 @@ fn channel_from_url(url: &str) -> Option<String> {
     Some(seg.to_lowercase())
 }
 
+fn itzon_channel_from_url(url: &str) -> Option<String> {
+    let after = url.split("itzon.tv/").nth(1)?;
+    let seg = after.split(['/', '?', '#']).next()?.trim();
+    if seg.is_empty() {
+        return None;
+    }
+    Some(seg.to_lowercase())
+}
+
 /// The localhost URL the player polls, with a cache-busting timestamp.
 fn local_player_url(port: u16) -> String {
     format!(
@@ -176,6 +186,28 @@ pub async fn start_stream(
     // Clear the prior solo session up front; only a live resolve below
     // re-registers it (keeps a stale session off clip/VOD playback).
     crate::services::stream_server::set_solo_session(None);
+    itzon_media::stop_heartbeat(crate::services::stream_server::SOLO_STREAM_ID).await;
+
+    if let Some(channel) = itzon_channel_from_url(&url) {
+        let playback = itzon_media::resolve_hls(&channel)
+            .await
+            .map_err(|error| error.to_string())?;
+        let port = StreamServer::start_proxy_server(playback.hls_url.clone())
+            .await
+            .map_err(|error| error.to_string())?;
+        itzon_media::start_heartbeat(crate::services::stream_server::SOLO_STREAM_ID, &playback)
+            .await;
+        log::info!("[Streaming] itzon:{} -> fMP4 relay", playback.channel);
+        return Ok(StreamStartResult {
+            url: local_player_url(port),
+            quality: "best".into(),
+            mode: None,
+            entitled: false,
+            proxy_region: None,
+            available: vec!["best".into()],
+            clip_source: None,
+        });
+    }
 
     let streamlink_settings = { state.settings.lock().unwrap().streamlink.clone() };
     let oauth = state.twitch_auth.get_token().await.ok();
@@ -275,6 +307,7 @@ pub async fn start_stream(
 
 #[tauri::command]
 pub async fn stop_stream() -> Result<(), String> {
+    itzon_media::stop_heartbeat(crate::services::stream_server::SOLO_STREAM_ID).await;
     StreamServer::stop().await.map_err(|e| e.to_string())
 }
 
@@ -354,7 +387,9 @@ pub async fn get_stream_qualities(
 
     // Resolve once at "best" and surface the variant menu it discovered. The
     // 20s master cache means the subsequent start_stream is a cache hit.
-    if let Some(slug) = tr::clip_slug_from_url(&url) {
+    if itzon_channel_from_url(&url).is_some() {
+        Ok(vec!["best".into()])
+    } else if let Some(slug) = tr::clip_slug_from_url(&url) {
         tr::resolve_clip(&slug, oauth.as_deref(), "best")
             .await
             .map(|r| r.available)

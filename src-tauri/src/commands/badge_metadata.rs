@@ -106,7 +106,12 @@ fn today_date_string() -> String {
         "November",
         "December",
     ];
-    format!("{} {} {}", dt.day(), MONTHS[(dt.month() - 1) as usize], dt.year())
+    format!(
+        "{} {} {}",
+        dt.day(),
+        MONTHS[(dt.month() - 1) as usize],
+        dt.year()
+    )
 }
 
 /// Recover an earn window from our own enricher prose so a badge with no
@@ -418,7 +423,10 @@ pub async fn store_enrichment_metadata(
             0, // Never expire
         )
         .await;
-        debug!("[BadgeMetadata] Stored relay enrichment for {}-v{}", badge_set_id, badge_version);
+        debug!(
+            "[BadgeMetadata] Stored relay enrichment for {}-v{}",
+            badge_set_id, badge_version
+        );
     }
 }
 

@@ -62,7 +62,7 @@ pub async fn read_frame<R: tokio::io::AsyncRead + Unpin>(
     }
     let mut body = vec![0u8; len];
     reader.read_exact(&mut body).await?;
-    let value: Value = serde_json::from_slice(&body)
-        .map_err(|e| anyhow!("frame body is not valid JSON: {e}"))?;
+    let value: Value =
+        serde_json::from_slice(&body).map_err(|e| anyhow!("frame body is not valid JSON: {e}"))?;
     Ok(Some(value))
 }

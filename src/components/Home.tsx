@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useAppStore, clipSourceOf, HomeTab } from '../stores/AppStore';
 import { createPortal } from 'react-dom';
-import { Search, ArrowLeft, Heart, Maximize2, X, Gift, Pickaxe, LayoutGrid, Flame, ArrowUpRight, Undo2, Users, User, Loader2, Clock, Play } from 'lucide-react';
+import { Search, ArrowLeft, Heart, Maximize2, X, Gift, Pickaxe, LayoutGrid, Flame, ArrowUpRight, Undo2, Users, User, Loader2, Clock, Play, RotateCw } from 'lucide-react';
 import { motion, LayoutGroup, AnimatePresence } from 'framer-motion';
 import { usemultiNookStore } from '../stores/multiNookStore';
 
@@ -12,6 +12,7 @@ import StreamTitleWithEmojis from './StreamTitleWithEmojis';
 import { StreamTileTags } from './StreamTileTags';
 import { useContextMenuStore } from '../stores/contextMenuStore';
 import { Tooltip } from './ui/Tooltip';
+import { ProviderLogo } from './ProviderLogo';
 import { GlassSelect } from './ui/GlassSelect';
 import { CategorySearchBox } from './ui/CategorySearchBox';
 import {
@@ -25,6 +26,8 @@ import {
 
 import { Logger } from '../utils/logger';
 import { useVisibleInterval } from '../utils/useVisibleInterval';
+import { getItzonExplore, getItzonFollowing, itzonStreamToTwitchStream, partitionItzonStreams } from '../services/itzon';
+import { makeKey } from '../utils/providerKey';
 // Types for drops data
 interface DropCampaign {
     id: string;
@@ -277,8 +280,9 @@ const QuickAddButton = ({ stream }: { stream: TwitchStream }) => {
                     ref={buttonRef}
                     onClick={(e) => {
                         e.stopPropagation();
-                        triggerAddAnimation(e.clientX, e.clientY, stream.user_login);
-                        addSlot(stream.user_login);
+                        const provider = stream.provider ?? 'twitch';
+                        triggerAddAnimation(e.clientX, e.clientY, stream.user_login, provider);
+                        addSlot(stream.user_login, provider);
                     }}
                     className="flex items-center justify-center glass-button !rounded-full aspect-square !p-1.5 text-white shadow-[0_4px_10px_rgba(0,0,0,0.5)]"
                 >
@@ -343,6 +347,87 @@ const Home = () => {
         mediaSearchQuery, setMediaSearchQuery,
     } = useAppStore();
     const externalDropsProvider = useAppStore((s) => s.externalDropsProvider);
+    const [itzonConnected, setItzonConnected] = useState(false);
+    const [itzonAccountName, setItzonAccountName] = useState<string | null>(null);
+    const [itzonLoginBusy, setItzonLoginBusy] = useState(false);
+    const [discoverProvider, setDiscoverProvider] = useState<'all' | 'twitch' | 'itzon'>('all');
+    const [itzonDiscoverStreams, setItzonDiscoverStreams] = useState<TwitchStream[]>([]);
+    const [itzonDiscoverLoading, setItzonDiscoverLoading] = useState(false);
+    const [itzonDiscoverError, setItzonDiscoverError] = useState<string | null>(null);
+    const [itzonFollowing, setItzonFollowing] = useState<Set<string>>(new Set());
+
+    const itzonStreams = useMemo(
+        () => partitionItzonStreams(itzonDiscoverStreams, itzonFollowing),
+        [itzonDiscoverStreams, itzonFollowing],
+    );
+    const itzonFollowedStreams = itzonStreams.followed;
+    const itzonRecommendedStreams = itzonStreams.recommended;
+    const allFollowedStreams = useMemo(
+        () => [...followedStreams, ...itzonFollowedStreams],
+        [followedStreams, itzonFollowedStreams],
+    );
+
+    useEffect(() => {
+        let active = true;
+
+        const loadItzonConnection = async () => {
+            try {
+                const connected = await invoke<boolean>('itzon_restore_session');
+                if (!active) return;
+
+                setItzonConnected(connected);
+                if (connected) {
+                    const [accountName, following] = await Promise.all([
+                        invoke<string | null>('itzon_account_name'),
+                        getItzonFollowing(),
+                    ]);
+                    if (active) {
+                        setItzonAccountName(accountName);
+                        setItzonFollowing(new Set(following.map(username => username.toLowerCase())));
+                    }
+                } else {
+                    setItzonAccountName(null);
+                    setItzonFollowing(new Set());
+                }
+            } catch (error) {
+                Logger.warn('[itzon] Could not read connection state:', error);
+            }
+        };
+
+        void loadItzonConnection();
+        return () => {
+            active = false;
+        };
+    }, []);
+
+    const loginToItzon = useCallback(async () => {
+        if (itzonConnected || itzonLoginBusy) return;
+
+        setItzonLoginBusy(true);
+        try {
+            await invoke('itzon_connect');
+            const [connected, accountName, following] = await Promise.all([
+                invoke<boolean>('itzon_is_connected'),
+                invoke<string | null>('itzon_account_name'),
+                getItzonFollowing(),
+            ]);
+            setItzonConnected(connected);
+            setItzonAccountName(accountName);
+            setItzonFollowing(new Set(following.map(username => username.toLowerCase())));
+            useAppStore.getState().addToast(
+                accountName ? `Connected to itzon as ${accountName}` : 'Connected to itzon',
+                'success',
+            );
+        } catch (error) {
+            Logger.warn('[itzon] Login failed:', error);
+            useAppStore.getState().addToast(
+                typeof error === 'string' ? error : 'Could not connect to itzon',
+                'error',
+            );
+        } finally {
+            setItzonLoginBusy(false);
+        }
+    }, [itzonConnected, itzonLoginBusy]);
 
     const [isLoadingOfflineChannels, setIsLoadingOfflineChannels] = useState(false);
     const [offlineChannelsFetched, setOfflineChannelsFetched] = useState(false);
@@ -394,14 +479,40 @@ const Home = () => {
     
     // Determine if Home is acting as an overlay over a playing stream/multinook
     const isOverlayMode = !!streamUrl || isMultiNookActive;
-    const isInMultiNook = useCallback((login: string) => 
-        multiNookSlots.some(s => s.channelLogin.toLowerCase() === login.toLowerCase()), 
+    const isInMultiNook = useCallback((login: string, provider: TwitchStream['provider'] = 'twitch') =>
+        multiNookSlots.some(s =>
+            s.channelLogin.toLowerCase() === login.toLowerCase() &&
+            (s.provider ?? 'twitch') === (provider ?? 'twitch')
+        ),
         [multiNookSlots]
     );
 
     // Use store state directly
     const activeTab = homeActiveTab;
     const selectedCategory = homeSelectedCategory;
+
+    const refreshItzonDiscovery = useCallback(async (showLoading = true) => {
+        if (showLoading) setItzonDiscoverLoading(true);
+        try {
+            const explore = await getItzonExplore();
+            setItzonDiscoverStreams(explore.streams.map(itzonStreamToTwitchStream));
+            setItzonDiscoverError(null);
+        } catch (error) {
+            const message = typeof error === 'string' ? error : 'Could not load itzon streams';
+            Logger.warn('[itzon] Discover refresh failed:', error);
+            setItzonDiscoverError(message);
+        } finally {
+            if (showLoading) setItzonDiscoverLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (activeTab === 'following' || activeTab === 'recommended') void refreshItzonDiscovery();
+    }, [activeTab, refreshItzonDiscovery]);
+
+    useVisibleInterval(() => {
+        if (activeTab === 'following' || activeTab === 'recommended') return refreshItzonDiscovery(false);
+    }, 30_000);
 
     // Wrapper functions to update store state
     const setActiveTab = (tab: HomeTab) => setHomeActiveTab(tab);
@@ -591,14 +702,14 @@ const Home = () => {
         if (homeActiveTab === 'category' || homeActiveTab === 'search' || homeActiveTab === 'browse') {
             return;
         }
-        if (isAuthenticated && followedStreams.length > 0) {
+        if ((isAuthenticated || itzonConnected) && allFollowedStreams.length > 0) {
             setActiveTab('following');
-        } else if (!isAuthenticated || followedStreams.length === 0) {
+        } else if ((!isAuthenticated && !itzonConnected) || allFollowedStreams.length === 0) {
             setActiveTab('recommended');
         }
         // Note: homeActiveTab intentionally not in deps to prevent feedback loop
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isAuthenticated, followedStreams.length]);
+    }, [isAuthenticated, itzonConnected, allFollowedStreams.length]);
 
     // Focus search input when expanded
     useEffect(() => {
@@ -1395,15 +1506,16 @@ const Home = () => {
         // matches the right-click context-menu "Add to MultiNook" action.
         if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
-            usemultiNookStore.getState().triggerAddAnimation(e.clientX, e.clientY, stream.user_login);
-            usemultiNookStore.getState().addSlot(stream.user_login);
+            const provider = stream.provider ?? 'twitch';
+            usemultiNookStore.getState().triggerAddAnimation(e.clientX, e.clientY, stream.user_login, provider);
+            usemultiNookStore.getState().addSlot(stream.user_login, provider);
             return;
         }
         // Track which category this stream was started from (if any)
         useAppStore.getState().setStreamOriginCategory(
             activeTab === 'category' && selectedCategory ? selectedCategory : null
         );
-        startStream(stream.user_login, stream);
+        startStream(stream.user_login, stream, false, stream.provider ?? 'twitch');
     };
 
     const handleFavoriteClick = (e: React.MouseEvent, userId: string) => {
@@ -1446,7 +1558,7 @@ const Home = () => {
         const scrollPercentage = (scrollTop + clientHeight) / scrollHeight;
 
         // Handle recommended streams infinite scroll
-        if (activeTab === 'recommended' && hasMoreRecommended && !isLoadingMore && !loadingRef.current) {
+        if (activeTab === 'recommended' && discoverProvider !== 'itzon' && hasMoreRecommended && !isLoadingMore && !loadingRef.current) {
             if (scrollPercentage > 0.8) {
                 loadingRef.current = true;
                 loadMoreRecommendedStreams().finally(() => {
@@ -1496,7 +1608,7 @@ const Home = () => {
             }
         }
     }, [
-        activeTab, hasMoreRecommended, isLoadingMore, loadMoreRecommendedStreams, 
+        activeTab, discoverProvider, hasMoreRecommended, isLoadingMore, loadMoreRecommendedStreams,
         hasMoreGames, isLoadingMoreGames, loadMoreTopGames, 
         categoryActiveTab, selectedCategoryTags,
         hasMoreCategoryStreams, isLoadingMoreCategoryStreams, loadMoreCategoryStreams,
@@ -1519,6 +1631,7 @@ const Home = () => {
     // event to trigger handleScroll.
     useEffect(() => {
         if (activeTab !== 'recommended') return;
+        if (discoverProvider === 'itzon') return;
         if (!hasMoreRecommended || isLoadingMore || loadingRef.current) return;
 
         const container = scrollContainerRef.current;
@@ -1531,12 +1644,19 @@ const Home = () => {
                 loadingRef.current = false;
             });
         }
-    }, [activeTab, recommendedStreams.length, hasMoreRecommended, isLoadingMore, loadMoreRecommendedStreams]);
+    }, [activeTab, discoverProvider, recommendedStreams.length, hasMoreRecommended, isLoadingMore, loadMoreRecommendedStreams]);
+
+    const discoverStreams = discoverProvider === 'itzon'
+        ? itzonRecommendedStreams
+        : discoverProvider === 'twitch'
+            ? recommendedStreams
+            : [...recommendedStreams, ...itzonRecommendedStreams]
+                .sort((a, b) => b.viewer_count - a.viewer_count);
 
     const displayStreams = activeTab === 'following'
-        ? sortStreamsByFavorites(followedStreams)
+        ? sortStreamsByFavorites(allFollowedStreams)
         : activeTab === 'recommended'
-            ? recommendedStreams
+            ? discoverStreams
             : activeTab === 'category'
                 ? categoryStreams
                 : searchResults.filter(s => s.viewer_count > 0 || s.is_live);
@@ -1769,7 +1889,7 @@ const Home = () => {
                             <MultiNookToggle />
                             <MultiChatButton />
                             <div className="border-l border-borderSubtle h-5 mx-0.5" />
-                            {isAuthenticated && (
+                            {(isAuthenticated || itzonConnected) && (
                                 <button
                                     onClick={() => { setActiveTab('following'); setIsSearchExpanded(false); }}
                                     className={`group relative px-3 py-1.5 text-sm font-medium rounded-lg transition-all duration-300 whitespace-nowrap ${activeTab === 'following'
@@ -1786,9 +1906,9 @@ const Home = () => {
                                     )}
                                     <span className={`relative z-10 flex items-center transition-all duration-300 ${activeTab !== 'following' ? 'group-hover:drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]' : ''}`}>
                                         Following
-                                        {followedStreams.length > 0 && (
+                                        {allFollowedStreams.length > 0 && (
                                             <span className="ml-1.5 text-xs opacity-80">
-                                                {followedStreams.length}
+                                                {allFollowedStreams.length}
                                             </span>
                                         )}
                                     </span>
@@ -2377,9 +2497,11 @@ const Home = () => {
                                             const hasDrops = false;
 
                                             return (() => {
-                                                const isQueued = isInMultiNook(stream.user_login);
-                                                const isSuckingUp = suckUpLogin === stream.user_login.toLowerCase();
-                                                const isMaterializing = materializingLogin === stream.user_login.toLowerCase();
+                                                const provider = stream.provider ?? 'twitch';
+                                                const sourceKey = makeKey(provider, stream.user_login);
+                                                const isQueued = isInMultiNook(stream.user_login, provider);
+                                                const isSuckingUp = suckUpLogin === sourceKey;
+                                                const isMaterializing = materializingLogin === sourceKey;
 
                                                 return (
                                                     <motion.div
@@ -2395,7 +2517,7 @@ const Home = () => {
                                                         }`}
                                                         style={!isQueued && hasDrops ? { boxShadow: '0 0 12px var(--color-accent-muted)' } : undefined}
                                                         onClick={(e) => !isQueued && handleStreamClick(e, stream)}
-                                                        onContextMenu={(e) => !isQueued && useContextMenuStore.getState().openMenu(e, stream)}
+                                                        onContextMenu={(e) => !isQueued && provider === 'twitch' && useContextMenuStore.getState().openMenu(e, stream)}
                                                     >
                                                         {isQueued && !isSuckingUp ? (
                                                             /* Ghost state — recall button + label */
@@ -2419,7 +2541,7 @@ const Home = () => {
                                                                                 const rect = card?.getBoundingClientRect();
                                                                                 const cx = rect ? rect.left + rect.width / 2 : e.clientX;
                                                                                 const cy = rect ? rect.top + rect.height / 2 : e.clientY;
-                                                                                triggerRecallAnimation(stream.user_login, cx, cy);
+                                                                                triggerRecallAnimation(stream.user_login, cx, cy, provider);
                                                                             }}
                                                                             className="glass-button !rounded-full !p-1.5 mt-1 text-textSecondary hover:text-accent transition-colors"
                                                                         >
@@ -2441,6 +2563,12 @@ const Home = () => {
                                                                     />
                                                                     <div className="absolute top-1.5 left-1.5 flex items-center gap-1">
                                                                         <div className="live-dot text-xs px-1.5 py-0.5">LIVE</div>
+                                                                        {provider === 'itzon' && (
+                                                                            <div className="inline-flex items-center gap-1 rounded bg-black/75 px-1.5 py-0.5 text-[9px] font-bold text-white shadow-sm">
+                                                                                <ProviderLogo provider="itzon" size={10} />
+                                                                                <span>ITZON</span>
+                                                                            </div>
+                                                                        )}
                                                                         {hasDrops && (
                                                                             <div className="drops-badge-glass">
                                                                                 <Gift size={10} />
@@ -2640,14 +2768,62 @@ const Home = () => {
                 {/* Following/Recommended/Search Views */}
                 {(activeTab === 'following' || activeTab === 'recommended' || activeTab === 'search') && (
                     <>
-                        {isSearching ? (
+                        {activeTab === 'recommended' && (
+                            <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-borderSubtle bg-secondary/35 px-3 py-2 backdrop-blur-md">
+                                <div className="flex items-center gap-1 rounded-xl bg-black/15 p-1">
+                                    {([
+                                        { id: 'all', label: 'All live', count: recommendedStreams.length + itzonRecommendedStreams.length },
+                                        { id: 'twitch', label: 'Twitch', count: recommendedStreams.length },
+                                        { id: 'itzon', label: 'ITZON', count: itzonRecommendedStreams.length },
+                                    ] as const).map((option) => (
+                                        <button
+                                            key={option.id}
+                                            type="button"
+                                            onClick={() => setDiscoverProvider(option.id)}
+                                            className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+                                                discoverProvider === option.id
+                                                    ? 'bg-white/10 text-textPrimary shadow-sm'
+                                                    : 'text-textSecondary hover:bg-white/[0.05] hover:text-textPrimary'
+                                            }`}
+                                        >
+                                            {option.id === 'twitch' && <ProviderLogo provider="twitch" size={10} />}
+                                            {option.id === 'itzon' && <ProviderLogo provider="itzon" size={10} />}
+                                            <span>{option.label}</span>
+                                            <span className="min-w-4 rounded-full bg-black/20 px-1.5 py-0.5 text-[9px] tabular-nums text-textMuted">
+                                                {option.count}
+                                            </span>
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    {itzonDiscoverError && (
+                                        <span className="hidden max-w-[280px] truncate text-[10px] text-error sm:block">
+                                            {itzonDiscoverError}
+                                        </span>
+                                    )}
+                                    <Tooltip content="Refresh live channels" side="bottom">
+                                        <button
+                                            type="button"
+                                            onClick={() => void refreshItzonDiscovery()}
+                                            disabled={itzonDiscoverLoading}
+                                            className="glass-button flex h-8 w-8 items-center justify-center rounded-lg text-textSecondary transition-colors hover:text-[#4ade80] disabled:opacity-50"
+                                        >
+                                            <RotateCw size={13} className={itzonDiscoverLoading ? 'animate-spin' : ''} />
+                                        </button>
+                                    </Tooltip>
+                                </div>
+                            </div>
+                        )}
+                        {isSearching || (activeTab === 'recommended' && itzonDiscoverLoading && displayStreams.length === 0) ? (
                             <div className="flex items-center justify-center h-full">
                                 <div className="text-center">
                                     <div className="animate-spin rounded-full h-12 w-12 border-4 border-glass border-t-accent mx-auto mb-3" />
-                                    <p className="text-textSecondary text-xs">Searching...</p>
+                                    <p className="text-textSecondary text-xs">
+                                        {isSearching ? 'Searching...' : 'Loading live channels...'}
+                                    </p>
                                 </div>
                             </div>
-                        ) : !isAuthenticated && activeTab === 'following' ? (
+                        ) : !isAuthenticated && !itzonConnected && activeTab === 'following' ? (
                             <div className="flex items-center justify-center h-full">
                                 <div className="text-center glass-panel p-6 max-w-sm">
                                     <h3 className="text-base font-bold text-textPrimary mb-1">Not Logged In</h3>
@@ -2678,29 +2854,65 @@ const Home = () => {
                                         {activeTab === 'following'
                                             ? 'None of your followed channels are live.'
                                             : activeTab === 'recommended'
-                                                ? 'Could not load streams.'
+                                                ? itzonDiscoverError && discoverProvider !== 'twitch'
+                                                    ? 'Could not load itzon streams.'
+                                                    : discoverProvider === 'itzon'
+                                                        ? 'No itzon channels are live right now.'
+                                                        : 'No channels are live right now.'
                                                 : searchMode === 'categories' 
                                                     ? `No categories found for "${searchQuery}".`
                                                     : `No channels found for "${searchQuery}".`}
                                     </p>
-                                    {/* Login prompt for unauthenticated users when streams fail to load */}
-                                    {!isAuthenticated && activeTab === 'recommended' && (
+                                    {activeTab === 'recommended' && (
                                         <div className="mt-4 pt-4 border-t border-borderSubtle">
-                                            <p className="text-textSecondary text-xs mb-3">
-                                                Log in for a better experience
+                                            <p className="text-textSecondary text-xs mb-3.5">
+                                                Connect a platform account
                                             </p>
-                                            <button
-                                                onClick={loginToTwitch}
-                                                disabled={isLoading}
-                                                className="glass-button flex items-center justify-center gap-2 px-4 py-2.5 text-white text-sm font-medium rounded-lg transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 mx-auto"
-                                            >
-                                                <svg fill="currentColor" viewBox="0 0 512 512" className="w-4 h-4">
-                                                    <path d="M80,32,48,112V416h96v64h64l64-64h80L464,304V32ZM416,288l-64,64H256l-64,64V352H112V80H416Z" />
-                                                    <rect x="320" y="143" width="48" height="129" />
-                                                    <rect x="208" y="143" width="48" height="129" />
-                                                </svg>
-                                                <span>{isLoading ? 'Logging in...' : 'Login with Twitch'}</span>
-                                            </button>
+                                            <div className="grid gap-2">
+                                                <button
+                                                    onClick={loginToTwitch}
+                                                    disabled={isLoading || isAuthenticated}
+                                                    className="group flex w-full items-center gap-3 rounded-xl border border-[#9147ff]/35 bg-[#9147ff]/10 px-3.5 py-3 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-[#9147ff]/65 hover:bg-[#9147ff]/15 hover:shadow-[0_8px_24px_rgba(145,71,255,0.12)] disabled:cursor-default disabled:opacity-65 disabled:hover:translate-y-0 disabled:hover:shadow-none"
+                                                >
+                                                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#9147ff] text-white shadow-[0_4px_12px_rgba(145,71,255,0.3)]">
+                                                        <svg fill="currentColor" viewBox="0 0 512 512" className="h-4 w-4">
+                                                            <path d="M80,32,48,112V416h96v64h64l64-64h80L464,304V32ZM416,288l-64,64H256l-64,64V352H112V80H416Z" />
+                                                            <rect x="320" y="143" width="48" height="129" />
+                                                            <rect x="208" y="143" width="48" height="129" />
+                                                        </svg>
+                                                    </span>
+                                                    <span className="min-w-0 flex-1">
+                                                        <span className="block text-sm font-semibold text-textPrimary">
+                                                            {isAuthenticated ? 'Twitch connected' : isLoading ? 'Logging in...' : 'Login with Twitch'}
+                                                        </span>
+                                                        <span className="block text-[11px] text-textSecondary">
+                                                            Followed streams and Twitch chat
+                                                        </span>
+                                                    </span>
+                                                    <ArrowUpRight size={14} className="text-[#a970ff] transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                                                </button>
+
+                                                <button
+                                                    onClick={() => void loginToItzon()}
+                                                    disabled={itzonLoginBusy || itzonConnected}
+                                                    className="group flex w-full items-center gap-3 rounded-xl border border-[#4ade80]/40 bg-[#4ade80]/10 px-3.5 py-3 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-[#4ade80]/70 hover:bg-[#4ade80]/15 hover:shadow-[0_8px_24px_rgba(74,222,128,0.12)] disabled:cursor-default disabled:opacity-65 disabled:hover:translate-y-0 disabled:hover:shadow-none"
+                                                >
+                                                    <ProviderLogo provider="itzon" size={32} className="shadow-[0_4px_12px_rgba(74,222,128,0.3)]" />
+                                                    <span className="min-w-0 flex-1">
+                                                        <span className="block truncate text-sm font-semibold text-textPrimary">
+                                                            {itzonConnected
+                                                                ? `itzon connected${itzonAccountName ? ` as ${itzonAccountName}` : ''}`
+                                                                : itzonLoginBusy
+                                                                    ? 'Waiting for itzon...'
+                                                                    : 'Login with itzon'}
+                                                        </span>
+                                                        <span className="block text-[11px] text-textSecondary">
+                                                            itzon chat, replies, and 7TV emotes
+                                                        </span>
+                                                    </span>
+                                                    <ArrowUpRight size={14} className="text-[#4ade80] transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                                                </button>
+                                            </div>
                                         </div>
                                     )}
                                 </div>
@@ -2716,13 +2928,17 @@ const Home = () => {
                                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
                                         {displayStreams.map(stream => {
                                         const isFavorite = isFavoriteStreamer(stream.user_id);
+                                        const provider = stream.provider ?? 'twitch';
                                         // Check if stream's game has active drops
-                                        const streamDropsCampaign = stream.game_name ? dropsGameNames.get(stream.game_name.toLowerCase()) : undefined;
+                                        const streamDropsCampaign = provider === 'twitch' && stream.game_name
+                                            ? dropsGameNames.get(stream.game_name.toLowerCase())
+                                            : undefined;
                                         const hasDrops = !!streamDropsCampaign;
                                         return (() => {
-                                            const isQueued = isInMultiNook(stream.user_login);
-                                            const isSuckingUp = suckUpLogin === stream.user_login.toLowerCase();
-                                            const isMaterializing = materializingLogin === stream.user_login.toLowerCase();
+                                            const sourceKey = makeKey(provider, stream.user_login);
+                                            const isQueued = isInMultiNook(stream.user_login, provider);
+                                            const isSuckingUp = suckUpLogin === sourceKey;
+                                            const isMaterializing = materializingLogin === sourceKey;
 
                                             return (
                                                 <motion.div
@@ -2737,7 +2953,7 @@ const Home = () => {
                                                                 : `glass-panel media-card cursor-pointer hover:bg-glass-hover ${isOverlayMode ? '!bg-black/40 !border-white/5' : ''} ${stream.has_shared_chat === true ? 'iridescent-border' : ''}`
                                                     }`}
                                                     onClick={(e) => !isQueued && handleStreamClick(e, stream)}
-                                                    onContextMenu={(e) => !isQueued && useContextMenuStore.getState().openMenu(e, stream)}
+                                                    onContextMenu={(e) => !isQueued && provider === 'twitch' && useContextMenuStore.getState().openMenu(e, stream)}
                                                 >
                                                     {isQueued && !isSuckingUp ? (
                                                         /* Ghost state — recall button + label */
@@ -2764,7 +2980,7 @@ const Home = () => {
                                                                             const rect = card?.getBoundingClientRect();
                                                                             const cx = rect ? rect.left + rect.width / 2 : e.clientX;
                                                                             const cy = rect ? rect.top + rect.height / 2 : e.clientY;
-                                                                            triggerRecallAnimation(stream.user_login, cx, cy);
+                                                                            triggerRecallAnimation(stream.user_login, cx, cy, provider);
                                                                         }}
                                                                         className="glass-button !rounded-full !p-1.5 mt-1 text-textSecondary hover:text-accent transition-colors"
                                                                     >
@@ -2786,6 +3002,12 @@ const Home = () => {
                                                                 />
                                                                 <div className="absolute top-1.5 left-1.5 flex items-center gap-1">
                                                                     <div className="live-dot text-xs px-1.5 py-0.5">LIVE</div>
+                                                                    {provider === 'itzon' && (
+                                                                        <div className="inline-flex items-center gap-1 rounded bg-black/75 px-1.5 py-0.5 text-[9px] font-bold text-white shadow-sm">
+                                                                            <ProviderLogo provider="itzon" size={10} />
+                                                                            <span>ITZON</span>
+                                                                        </div>
+                                                                    )}
                                                                     {hasDrops && (
                                                                         <div className="drops-badge-glass">
                                                                             <Gift size={10} />
@@ -2823,12 +3045,13 @@ const Home = () => {
                                                                     <button 
                                                                         onClick={(e) => { 
                                                                             e.stopPropagation(); 
-                                                                            useAppStore.getState().setProfileModalUser(stream); 
+                                                                            if (provider === 'twitch') useAppStore.getState().setProfileModalUser(stream);
                                                                         }}
-                                                                        className="flex items-center gap-1 text-textSecondary text-xs hover:text-textPrimary hover:bg-glass-hover px-1.5 py-0.5 -mx-1.5 -my-0.5 rounded transition-all cursor-pointer text-left focus:outline-none w-max max-w-full"
+                                                                        disabled={provider !== 'twitch'}
+                                                                        className="flex items-center gap-1 text-textSecondary text-xs enabled:hover:text-textPrimary enabled:hover:bg-glass-hover px-1.5 py-0.5 -mx-1.5 -my-0.5 rounded transition-all enabled:cursor-pointer text-left focus:outline-none w-max max-w-full"
                                                                     >
                                                                         <span className="truncate">{stream.user_name}</span>
-                                                                        {stream.broadcaster_type === 'partner' && (
+                                                                        {provider === 'twitch' && stream.broadcaster_type === 'partner' && (
                                                                             <svg className="w-3 h-3 flex-shrink-0" viewBox="0 0 16 16" fill="#9146FF">
                                                                                 <path fillRule="evenodd" d="M12.5 3.5 8 2 3.5 3.5 2 8l1.5 4.5L8 14l4.5-1.5L14 8l-1.5-4.5ZM7 11l4.5-4.5L10 5 7 8 5.5 6.5 4 8l3 3Z" clipRule="evenodd"></path>
                                                                             </svg>
@@ -2839,7 +3062,7 @@ const Home = () => {
                                                                             <button 
                                                                                 onClick={(e) => {
                                                                                     e.stopPropagation();
-                                                                                    if (stream.game_id && stream.game_name) {
+                                                                                    if (provider === 'twitch' && stream.game_id && stream.game_name) {
                                                                                         handleCategoryClick({ 
                                                                                             id: stream.game_id, 
                                                                                             name: stream.game_name, 
@@ -2847,7 +3070,8 @@ const Home = () => {
                                                                                         });
                                                                                     }
                                                                                 }}
-                                                                                className="flex items-center gap-1 text-textMuted text-xs hover:text-textPrimary hover:bg-glass-hover px-1.5 py-0.5 -mx-1.5 -my-0.5 rounded transition-all text-left cursor-pointer focus:outline-none overflow-hidden"
+                                                                                disabled={provider !== 'twitch'}
+                                                                                className="flex items-center gap-1 text-textMuted text-xs enabled:hover:text-textPrimary enabled:hover:bg-glass-hover px-1.5 py-0.5 -mx-1.5 -my-0.5 rounded transition-all text-left enabled:cursor-pointer focus:outline-none overflow-hidden"
                                                                             >
                                                                                 <span className="line-clamp-1">{stream.game_name}</span>
                                                                                 {hasDrops && (
@@ -3017,12 +3241,12 @@ const Home = () => {
                                     </div>
                                 )}
 
-                                {activeTab === 'recommended' && isLoadingMore && (
+                                {activeTab === 'recommended' && discoverProvider !== 'itzon' && isLoadingMore && (
                                     <div className="flex justify-center items-center py-6">
                                         <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-accent"></div>
                                     </div>
                                 )}
-                                {activeTab === 'recommended' && !hasMoreRecommended && displayStreams.length > 0 && (
+                                {activeTab === 'recommended' && discoverProvider !== 'itzon' && !hasMoreRecommended && displayStreams.length > 0 && (
                                     <div className="text-center py-6">
                                         <p className="text-textSecondary text-xs">No more streams</p>
                                     </div>

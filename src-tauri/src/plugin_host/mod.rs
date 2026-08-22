@@ -547,7 +547,10 @@ impl PluginHost {
                 .find(|p| p.id == plugin_id)
                 .ok_or_else(|| anyhow!("plugin '{plugin_id}' is not installed"))?;
             plugin.enabled = enabled;
-            let info = (plugin.kind.clone(), plugin.kind == "ui" || plugin.ui_entry.is_some());
+            let info = (
+                plugin.kind.clone(),
+                plugin.kind == "ui" || plugin.ui_entry.is_some(),
+            );
             registry::save(&registry)?;
             info
         };
@@ -651,7 +654,10 @@ impl PluginHost {
         self.inner
             .set_credential_consent(plugin_id, kind, "revoked")
             .await?;
-        registry::audit_append(plugin_id, &format!("credential consent revoked kind={kind}"));
+        registry::audit_append(
+            plugin_id,
+            &format!("credential consent revoked kind={kind}"),
+        );
         Ok(())
     }
 
@@ -738,7 +744,6 @@ impl PluginHost {
     pub async fn emit_chat_message(&self, params: Value) {
         self.inner.emit_event("on_chat_message", params).await;
     }
-
 
     /// Graceful shutdown of every running plugin (used at app exit).
     pub async fn shutdown_all(&self) {

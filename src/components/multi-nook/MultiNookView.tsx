@@ -25,6 +25,8 @@ import { MultiNookTutorial } from './MultiNookTutorial';
 import { usemultiNookStore } from '../../stores/multiNookStore';
 import { useTutorialStore } from '../../stores/tutorialStore';
 import { acquireChannel, releaseChannel } from '../../stores/chatConnectionStore';
+import type { ProviderId } from '../../types/providers';
+import { makeKey, parseKey } from '../../utils/providerKey';
 import { Logger } from '../../utils/logger';
 import { useVisibleInterval } from '../../utils/useVisibleInterval';
 import { useMultiNookSync } from './useMultiNookSync';
@@ -76,22 +78,25 @@ export const MultiNookView: React.FC = () => {
   // so unchanged channels keep a steady ref count across renders.
   const connectedChatKeysRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    const desired = new Map<string, string | null>();
+    const desired = new Map<string, { channel: string; channelId: string | null; provider: ProviderId }>();
     for (const s of visibleSlots) {
-      desired.set(s.channelLogin.toLowerCase(), s.channelId ?? null);
+      const provider = s.provider ?? 'twitch';
+      const channel = s.channelLogin.toLowerCase();
+      desired.set(makeKey(provider, channel), { channel, channelId: s.channelId ?? null, provider });
     }
-    for (const [login, channelId] of desired) {
-      if (!connectedChatKeysRef.current.has(login)) {
-        connectedChatKeysRef.current.add(login);
-        void acquireChannel(login, channelId).catch((err) =>
+    for (const [key, source] of desired) {
+      if (!connectedChatKeysRef.current.has(key)) {
+        connectedChatKeysRef.current.add(key);
+        void acquireChannel(source.channel, source.channelId, source.provider).catch((err) =>
           Logger.error('[MultiNook] background chat acquire failed:', err),
         );
       }
     }
-    for (const login of Array.from(connectedChatKeysRef.current)) {
-      if (!desired.has(login)) {
-        connectedChatKeysRef.current.delete(login);
-        void releaseChannel(login).catch((err) =>
+    for (const key of Array.from(connectedChatKeysRef.current)) {
+      if (!desired.has(key)) {
+        connectedChatKeysRef.current.delete(key);
+        const source = parseKey(key);
+        void releaseChannel(source.channel, source.provider).catch((err) =>
           Logger.warn('[MultiNook] background chat release failed:', err),
         );
       }
@@ -102,8 +107,9 @@ export const MultiNookView: React.FC = () => {
   useEffect(() => {
     const keys = connectedChatKeysRef.current;
     return () => {
-      for (const login of Array.from(keys)) {
-        void releaseChannel(login).catch(() => {});
+      for (const key of Array.from(keys)) {
+        const source = parseKey(key);
+        void releaseChannel(source.channel, source.provider).catch(() => {});
       }
       keys.clear();
     };
@@ -131,7 +137,7 @@ export const MultiNookView: React.FC = () => {
   // rather than on `slots` itself: volume drags and focus changes mutate slots
   // constantly and would restart the interval each time.
   const loginKey = useMemo(
-    () => slots.map((s) => s.channelLogin.toLowerCase()).sort().join(','),
+    () => slots.map((s) => `${s.provider ?? 'twitch'}:${s.channelLogin.toLowerCase()}`).sort().join(','),
     [slots],
   );
   useEffect(() => {

@@ -118,7 +118,13 @@ impl ChatProvider for YouTubeProvider {
             }
             let mut consumers = HashSet::new();
             consumers.insert(window.to_string());
-            conns.insert(id_lc.clone(), Connection { consumers, task: None });
+            conns.insert(
+                id_lc.clone(),
+                Connection {
+                    consumers,
+                    task: None,
+                },
+            );
         }
 
         // Count this as a bridge user BEFORE the (network) resolve, for the same
@@ -179,7 +185,12 @@ impl ChatProvider for YouTubeProvider {
         Ok(())
     }
 
-    async fn send(&self, channel: &str, text: &str, _reply_to: Option<&str>) -> Result<SendOutcome> {
+    async fn send(
+        &self,
+        channel: &str,
+        text: &str,
+        _reply_to: Option<&str>,
+    ) -> Result<SendOutcome> {
         let drop = |reason: &str| SendOutcome {
             message_id: None,
             is_sent: false,
@@ -189,7 +200,9 @@ impl ChatProvider for YouTubeProvider {
             return Ok(drop("Connect your YouTube account to send"));
         }
         let Some(meta) = channel_meta(channel) else {
-            return Ok(drop("YouTube channel isn't resolved yet — try again in a moment"));
+            return Ok(drop(
+                "YouTube channel isn't resolved yet — try again in a moment",
+            ));
         };
         let (Some(channel_id), Some(video_id), Some(api_key)) = (
             meta.user_id.as_deref(),
@@ -199,7 +212,8 @@ impl ChatProvider for YouTubeProvider {
             return Ok(drop("YouTube channel isn't fully resolved yet"));
         };
         let params = send_message_params(channel_id, video_id);
-        let body = json!({ "richMessage": { "textSegments": [{ "text": text }] }, "params": params });
+        let body =
+            json!({ "richMessage": { "textSegments": [{ "text": text }] }, "params": params });
         match post_innertube_authed("send_message", api_key, &meta, body).await {
             Ok(v) => {
                 // The send response can say WE were timed out instead of accepting.
@@ -663,7 +677,9 @@ fn live_page_url(identifier: &str) -> String {
 }
 
 fn is_video_id(s: &str) -> bool {
-    s.len() == 11 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    s.len() == 11
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 /// Outcome of parsing a page we hoped was a live watch page.
@@ -676,11 +692,7 @@ enum WatchOutcome {
 }
 
 /// GET a YouTube page's HTML, mapping the EU consent interstitial to a clear error.
-async fn fetch_youtube_html(
-    http: &reqwest::Client,
-    url: &str,
-    identifier: &str,
-) -> Result<String> {
+async fn fetch_youtube_html(http: &reqwest::Client, url: &str, identifier: &str) -> Result<String> {
     let resp = http.get(url).send().await?;
     let final_url = resp.url().clone();
     let html = resp.text().await?;
@@ -783,7 +795,10 @@ async fn parse_watch_page(
             }
         },
         None => {
-            log::warn!("[YouTube] '{}' has no video id; using Top chat bootstrap", identifier);
+            log::warn!(
+                "[YouTube] '{}' has no video id; using Top chat bootstrap",
+                identifier
+            );
             bootstrap
         }
     };
@@ -944,14 +959,23 @@ async fn fetch_live_continuation(http: &reqwest::Client, video_id: &str) -> Opti
                         } else {
                             log::warn!(
                                 "[YouTube] live_chat had no ytInitialData (attempt {}, {} bytes)",
-                                attempt, html.len()
+                                attempt,
+                                html.len()
                             );
                         }
                     }
-                    Err(e) => log::warn!("[YouTube] live_chat read failed (attempt {}): {}", attempt, e),
+                    Err(e) => log::warn!(
+                        "[YouTube] live_chat read failed (attempt {}): {}",
+                        attempt,
+                        e
+                    ),
                 }
             }
-            Err(e) => log::warn!("[YouTube] live_chat fetch failed (attempt {}): {}", attempt, e),
+            Err(e) => log::warn!(
+                "[YouTube] live_chat fetch failed (attempt {}): {}",
+                attempt,
+                e
+            ),
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -1000,7 +1024,8 @@ fn extract_meta(player: Option<&Value>, initial: Option<&Value>, html: &str) -> 
         .and_then(|s| s.as_str())
         .map(String::from);
     // Concurrent viewers: best-effort from ytInitialData's view-count renderer.
-    let viewer_count = json_str_after(html, "\"originalViewCount\":\"").and_then(|s| s.parse().ok());
+    let viewer_count =
+        json_str_after(html, "\"originalViewCount\":\"").and_then(|s| s.parse().ok());
     let profile_pic = initial.and_then(find_owner_avatar);
     let video_id = vd
         .and_then(|d| d.get("videoId"))
@@ -1028,11 +1053,15 @@ fn find_owner_avatar(initial: &Value) -> Option<String> {
         .pointer("/contents/twoColumnWatchNextResults/results/results/contents")
         .and_then(|c| c.as_array())?;
     for item in contents {
-        if let Some(thumbs) = item.pointer(
-            "/videoSecondaryInfoRenderer/owner/videoOwnerRenderer/thumbnail/thumbnails",
-        ) {
+        if let Some(thumbs) = item
+            .pointer("/videoSecondaryInfoRenderer/owner/videoOwnerRenderer/thumbnail/thumbnails")
+        {
             if let Some(arr) = thumbs.as_array() {
-                if let Some(url) = arr.last().and_then(|t| t.get("url")).and_then(|u| u.as_str()) {
+                if let Some(url) = arr
+                    .last()
+                    .and_then(|t| t.get("url"))
+                    .and_then(|u| u.as_str())
+                {
                     return Some(url.to_string());
                 }
             }
@@ -1306,10 +1335,18 @@ fn parse_paid(r: &Value, channel_key: &str, kind: &str) -> ChatMessage {
     let (mut segments, comment) = parse_runs(r.get("message"));
     // Prepend the donation label so the line reads e.g. "Super Chat · $5.00  <msg>".
     let lead = format!("{}  ", label);
-    segments.insert(0, MessageSegment::Text { content: lead.clone() });
+    segments.insert(
+        0,
+        MessageSegment::Text {
+            content: lead.clone(),
+        },
+    );
     let plain = format!("{}{}", lead, comment);
     // The header background color is YouTube's tier indicator; use it for the name.
-    let color = argb_to_hex(r.get("headerBackgroundColor").or_else(|| r.get("backgroundColor")));
+    let color = argb_to_hex(
+        r.get("headerBackgroundColor")
+            .or_else(|| r.get("backgroundColor")),
+    );
     let display = r
         .pointer("/authorName/simpleText")
         .and_then(|x| x.as_str())
@@ -1364,11 +1401,23 @@ fn parse_membership(r: &Value, channel_key: &str) -> ChatMessage {
         .unwrap_or("");
     let system = format!("{} · {}", display, header);
     let (segments, plain) = if segments.is_empty() {
-        (vec![MessageSegment::Text { content: header.clone() }], header)
+        (
+            vec![MessageSegment::Text {
+                content: header.clone(),
+            }],
+            header,
+        )
     } else {
         (segments, plain)
     };
-    base_message(r, channel_key, segments, plain, None, Some(("membership", system)))
+    base_message(
+        r,
+        channel_key,
+        segments,
+        plain,
+        None,
+        Some(("membership", system)),
+    )
 }
 
 fn parse_gift_membership(r: &Value, channel_key: &str) -> ChatMessage {
@@ -1388,7 +1437,9 @@ fn parse_gift_membership(r: &Value, channel_key: &str) -> ChatMessage {
         .and_then(|x| x.as_str())
         .unwrap_or("");
     let system = format!("{} {}", display, primary);
-    let segs = vec![MessageSegment::Text { content: primary.clone() }];
+    let segs = vec![MessageSegment::Text {
+        content: primary.clone(),
+    }];
     // Build off the inner header (it carries the gifter's name/badges/id).
     let mut msg = base_message(
         inner.unwrap_or(r),
@@ -1507,7 +1558,10 @@ fn base_message(
 fn parse_runs(message: Option<&Value>) -> (Vec<MessageSegment>, String) {
     let mut segments = Vec::new();
     let mut plain = String::new();
-    let Some(runs) = message.and_then(|m| m.get("runs")).and_then(|r| r.as_array()) else {
+    let Some(runs) = message
+        .and_then(|m| m.get("runs"))
+        .and_then(|r| r.as_array())
+    else {
         return (segments, plain);
     };
     for run in runs {
@@ -1539,7 +1593,10 @@ fn parse_runs(message: Option<&Value>) -> (Vec<MessageSegment>, String) {
                 plain.push_str(label);
                 segments.push(MessageSegment::Emote {
                     content: label.to_string(),
-                    emote_id: emoji.get("emojiId").and_then(|e| e.as_str()).map(String::from),
+                    emote_id: emoji
+                        .get("emojiId")
+                        .and_then(|e| e.as_str())
+                        .map(String::from),
                     emote_url: url.to_string(),
                     is_zero_width: None,
                     modifier_flags: None,
@@ -1563,7 +1620,10 @@ fn parse_badges(author_badges: Option<&Value>) -> Vec<Badge> {
             continue;
         };
         let tooltip = r.get("tooltip").and_then(|t| t.as_str()).unwrap_or("");
-        if let Some(thumbs) = r.pointer("/customThumbnail/thumbnails").and_then(|t| t.as_array()) {
+        if let Some(thumbs) = r
+            .pointer("/customThumbnail/thumbnails")
+            .and_then(|t| t.as_array())
+        {
             // Member badge: real per-tier art.
             let img = thumbs
                 .last()
@@ -1694,7 +1754,9 @@ fn runs_text(v: Option<&Value>) -> Option<String> {
 fn usec_to_iso(usec: &str) -> String {
     usec.parse::<i64>()
         .ok()
-        .and_then(|us| chrono::DateTime::from_timestamp(us / 1_000_000, ((us % 1_000_000) * 1000) as u32))
+        .and_then(|us| {
+            chrono::DateTime::from_timestamp(us / 1_000_000, ((us % 1_000_000) * 1000) as u32)
+        })
         .map(|dt| dt.to_rfc3339())
         .unwrap_or_default()
 }
@@ -1758,7 +1820,10 @@ mod tests {
         assert_eq!(msg.badges.len(), 1);
         assert_eq!(msg.badges[0].name, "moderator");
         assert!(!msg.timestamp.is_empty());
-        assert_eq!(msg.tags.get("avatar").map(String::as_str), Some("https://yt/a64.png"));
+        assert_eq!(
+            msg.tags.get("avatar").map(String::as_str),
+            Some("https://yt/a64.png")
+        );
     }
 
     #[test]
@@ -1792,7 +1857,9 @@ mod tests {
         let ended = r#"var ytInitialPlayerResponse = {"videoDetails":{"isLive":false,"isLiveContent":true}};"#;
         assert!(!is_currently_live(ended));
         // Plain upload / no player — reject.
-        assert!(!is_currently_live(r#"var ytInitialPlayerResponse = {"videoDetails":{}};"#));
+        assert!(!is_currently_live(
+            r#"var ytInitialPlayerResponse = {"videoDetails":{}};"#
+        ));
         assert!(!is_currently_live("no player here"));
     }
 
@@ -1832,7 +1899,11 @@ mod tests {
     // so matching them proves the primitives the send/moderate params are built from.
     #[test]
     fn protobuf_matches_masterchat_fixtures() {
-        let t = pb::b1(&pb::cat(&[pb::ld(1, b"asr"), pb::ld(2, b"en"), pb::ld(3, b"")]));
+        let t = pb::b1(&pb::cat(&[
+            pb::ld(1, b"asr"),
+            pb::ld(2, b"en"),
+            pb::ld(3, b""),
+        ]));
         assert_eq!(t, "CgNhc3ISAmVuGgA%3D");
 
         let hdt = base64::engine::general_purpose::STANDARD.encode(pb::cat(&[
@@ -1842,7 +1913,11 @@ mod tests {
         ]));
         let lrc = pb::b1(&pb::ld(
             119693434,
-            &pb::cat(&[pb::ld(3, hdt.as_bytes()), pb::vt(6, 1), pb::ld(16, &pb::vt(1, 4))]),
+            &pb::cat(&[
+                pb::ld(3, hdt.as_bytes()),
+                pb::vt(6, 1),
+                pb::ld(16, &pb::vt(1, 4)),
+            ]),
         ));
         assert_eq!(
             lrc,

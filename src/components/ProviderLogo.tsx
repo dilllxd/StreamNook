@@ -1,12 +1,13 @@
-// Renders a source platform's real brand mark (Twitch glitch / Kick), bundled as
-// colored SVGs. Falls back to a brand-color dot for providers whose logo isn't
-// bundled yet. Used on MultiChat tabs, per-column headers, and mod-panel cells.
+// Renders a source platform's real bundled brand mark. Falls back to a
+// brand-color dot only for providers whose logo is not bundled yet.
 
 import { Tooltip } from './ui/Tooltip';
 import twitchLogo from '../assets/provider-logos/twitch.svg?url';
 import kickLogo from '../assets/provider-logos/kick.svg?url';
 import youtubeLogo from '../assets/provider-logos/youtube.svg?url';
 import tiktokLogo from '../assets/provider-logos/tiktok.svg?url';
+import itzonLogo from '../assets/provider-logos/itzon.png?url';
+import itzonSmallLogo from '../assets/provider-logos/itzon-small.png?url';
 import { PROVIDERS, type ProviderId } from '../types/providers';
 
 const LOGOS: Partial<Record<ProviderId, string>> = {
@@ -14,6 +15,7 @@ const LOGOS: Partial<Record<ProviderId, string>> = {
   kick: kickLogo,
   youtube: youtubeLogo,
   tiktok: tiktokLogo,
+  itzon: itzonLogo,
 };
 
 /** The bundled brand-logo URL for a provider, or undefined if not bundled. */
@@ -31,7 +33,7 @@ export function ProviderLogo({
   className?: string;
 }) {
   const meta = PROVIDERS[provider];
-  const src = providerLogo(provider);
+  const src = provider === 'itzon' && size <= 24 ? itzonSmallLogo : providerLogo(provider);
   if (src) {
     return (
       <Tooltip content={meta.label}>

@@ -268,15 +268,14 @@ pub async fn prepare_install(
                     signing::key_fingerprint(&entry.author.pubkey)
                 );
             }
-            let prev_sig =
-                http_get_text(&format!("{}.prev", meta.signature_url), 64 * 1024)
-                    .await
-                    .map_err(|_| {
-                        anyhow!(
-                            "the author rotated their signing key but provides no \
+            let prev_sig = http_get_text(&format!("{}.prev", meta.signature_url), 64 * 1024)
+                .await
+                .map_err(|_| {
+                    anyhow!(
+                        "the author rotated their signing key but provides no \
                              second signature by the old key"
-                        )
-                    })?;
+                    )
+                })?;
             signing::verify_minisign(&artifact, &prev_sig, pinned)?;
             entry.author.pubkey.clone()
         }
@@ -298,15 +297,17 @@ pub async fn prepare_install(
     let manifest_text = std::fs::read_to_string(staging.join("plugin.toml"))
         .map_err(|_| anyhow!("artifact has no plugin.toml at its root"))?;
     let manifest = PluginManifest::parse(&manifest_text)?;
-    if manifest.id != entry.id || manifest.version != entry.version || manifest.tier != entry.tier
-    {
+    if manifest.id != entry.id || manifest.version != entry.version || manifest.tier != entry.tier {
         std::fs::remove_dir_all(&staging).ok();
         bail!("the artifact's manifest does not match the index entry (id, version, or tier)");
     }
     manifest.check_host_min(env!("CARGO_PKG_VERSION"))?;
     if !staging.join(&manifest.runtime.entry).exists() {
         std::fs::remove_dir_all(&staging).ok();
-        bail!("the artifact does not contain its declared entry '{}'", manifest.runtime.entry);
+        bail!(
+            "the artifact does not contain its declared entry '{}'",
+            manifest.runtime.entry
+        );
     }
     if let Some(ui_entry) = &manifest.runtime.ui_entry {
         if !staging.join(ui_entry).exists() {
@@ -334,7 +335,10 @@ pub fn prepare_local_install(dir: &str) -> Result<InstalledPlugin> {
     let manifest = PluginManifest::parse(&manifest_text)?;
     manifest.check_host_min(env!("CARGO_PKG_VERSION"))?;
     if !dir_path.join(&manifest.runtime.entry).exists() {
-        bail!("the folder does not contain the declared entry '{}'", manifest.runtime.entry);
+        bail!(
+            "the folder does not contain the declared entry '{}'",
+            manifest.runtime.entry
+        );
     }
     if let Some(ui_entry) = &manifest.runtime.ui_entry {
         if !dir_path.join(ui_entry).exists() {
@@ -344,11 +348,7 @@ pub fn prepare_local_install(dir: &str) -> Result<InstalledPlugin> {
     Ok(record_from_manifest(&manifest, "local-dev", &dir_path))
 }
 
-fn record_from_manifest(
-    manifest: &PluginManifest,
-    source: &str,
-    dir: &PathBuf,
-) -> InstalledPlugin {
+fn record_from_manifest(manifest: &PluginManifest, source: &str, dir: &PathBuf) -> InstalledPlugin {
     // Enabling the plugin is the grant: the install (or first-enable) consent
     // already discloses the credential, so allow handover without re-prompting
     // every session. The user can still revoke it per plugin from its details.

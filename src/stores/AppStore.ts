@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, emit } from '@tauri-apps/api/event';
 import type { Settings, TwitchUser, TwitchStream, UserInfo, TwitchCategory, HypeTrainData, TwitchVideo, ModLogEvent, DropProgressStatus } from '../types';
+import type { ProviderId } from '../types/providers';
 import { trackActivity } from '../services/logService';
 import { Logger, setDiagnosticsEnabled } from '../utils/logger';
 // Direct import (not via the keybindings index) to avoid a storecommands cycle.
@@ -10,6 +11,7 @@ import { qualitiesEquivalent } from '../utils/quality';
 import { reportCodecPreference } from '../utils/codecPreference';
 import { upsertUser, claimLoginAccolades, grantAtmosphereOwnership } from '../services/supabaseService';
 import { emitSettingsUpdated } from '../utils/settingsBroadcast';
+import { itzonAvatarUrl, itzonLiveThumbnailUrl } from '../services/itzon';
 
 type StreamStartResult = {
   url: string;
@@ -59,6 +61,12 @@ function adSourceFrom(result: StreamStartResult): AdSource | null {
 function logQualityFallback(requested: string, actual: string) {
   if (qualitiesEquivalent(requested, actual)) return;
   Logger.info(`[Stream] Quality fallback: ${requested} -> ${actual}`);
+}
+
+function liveStreamPageUrl(stream: Pick<TwitchStream, 'user_login' | 'provider'>): string {
+  return stream.provider === 'itzon'
+    ? `https://itzon.tv/${stream.user_login}`
+    : `https://twitch.tv/${stream.user_login}`;
 }
 
 export interface Toast {
@@ -397,7 +405,7 @@ interface AppState {
   loadFollowedStreams: () => Promise<void>;
   loadRecommendedStreams: () => Promise<void>;
   loadMoreRecommendedStreams: () => Promise<void>;
-  startStream: (channel: string, streamInfo?: TwitchStream, skipChatRefresh?: boolean) => Promise<void>;
+  startStream: (channel: string, streamInfo?: TwitchStream, skipChatRefresh?: boolean, provider?: ProviderId) => Promise<void>;
   startOfflineChat: (channel: string, streamInfo?: TwitchStream) => Promise<void>;
   playMedia: (type: 'clip' | 'video', url: string, info: MediaInfo) => Promise<void>;
   stopStream: (options?: { preserveBackend?: boolean }) => Promise<void>;
@@ -777,6 +785,24 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     if (!currentStream) {
       Logger.debug('[AutoSwitch] No current stream to switch from');
+      return;
+    }
+
+    if (currentStream.provider === 'itzon') {
+      try {
+        const status = await invoke<{ live: boolean }>('get_itzon_channel', {
+          username: currentStream.user_login,
+        });
+        if (status.live) {
+          await get().restartStream();
+        } else {
+          get().addToast(`${currentStream.user_name} went offline on itzon`, 'info');
+          await get().stopStream();
+          set({ isHomeActive: true });
+        }
+      } catch (error) {
+        Logger.warn('[itzon] Could not verify stream liveness:', error);
+      }
       return;
     }
 
@@ -1468,6 +1494,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   stopStream: async (options) => {
     const preserveBackend = options?.preserveBackend ?? false;
+    const stoppingStream = get().currentStream;
     trackActivity('Stopped stream');
     // Tear down any VOD chat replay session (no-op if none is active).
     import('./vodReplayStore')
@@ -1489,7 +1516,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       // the same channel and leave chat stuck "connecting" (the IRC connection
       // would already be gone — hence the "IRC connection not established" PART).
       if (!preserveBackend) {
-        await invoke('stop_chat');
+        if ((stoppingStream?.provider ?? 'twitch') === 'twitch') {
+          await invoke('stop_chat');
+        }
 
         // Stop drops monitoring
         try {
@@ -1499,9 +1528,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           Logger.warn('Could not stop drops monitoring:', e);
         }
 
-        const currentStream = get().currentStream;
-        if (currentStream?.user_id) {
-           invoke('unregister_active_channel', { channelId: currentStream.user_id }).catch(() => {});
+        if (stoppingStream?.provider !== 'itzon' && stoppingStream?.user_id) {
+           invoke('unregister_active_channel', { channelId: stoppingStream.user_id }).catch(() => {});
         }
 
         // Clean up EventSub listeners
@@ -1578,7 +1606,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     // If we somehow landed here with an empty user_id (e.g. a previous startStream
     // hit a transient get_channel_info failure during a raid), repair it before
     // restarting — otherwise the Follow / Subscribe buttons stay broken across refresh.
-    if (!streamInfo.user_id) {
+    if (!streamInfo.user_id && streamInfo.provider !== 'itzon') {
       try {
         const rawInfo = await invoke<{ broadcaster_id?: string; broadcaster_name?: string; title?: string; game_name?: string }>('get_channel_info', { channelName: channel });
         if (rawInfo.broadcaster_id) {
@@ -1607,7 +1635,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await new Promise(resolve => setTimeout(resolve, 300));
       
       // Restart with the same channel
-      const url = `https://twitch.tv/${channel}`;
+      const url = liveStreamPageUrl(streamInfo);
       Logger.debug(`[Stream] Restarting: ${url} at quality: ${quality}`);
       
       const result = await invoke<StreamStartResult>('start_stream', { url, quality });
@@ -1627,7 +1655,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       // never gets a chance. Confirm liveness and hand a dead channel to
       // handleStreamOffline (auto-switch / offline chat) instead of retrying.
       try {
-        const live = await invoke('check_stream_online', { userLogin: channel }) as TwitchStream | null;
+        const live = streamInfo.provider === 'itzon'
+          ? (await invoke<{ live: boolean }>('get_itzon_channel', { username: channel })).live
+          : !!(await invoke('check_stream_online', { userLogin: channel }) as TwitchStream | null);
         if (!live) {
           Logger.info(`[Stream] ${channel} is offline; routing to auto-switch instead of restarting`);
           set({ isRestartingStream: false });
@@ -1642,7 +1672,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       // Try to recover by starting fresh
       try {
-        await get().startStream(channel, streamInfo);
+        await get().startStream(channel, streamInfo, false, streamInfo.provider);
       } catch (retryError) {
         Logger.error('[Stream] Retry also failed:', retryError);
       }
@@ -1665,7 +1695,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     // own live-only guard. Promise.allSettled so a failure in one half doesn't
     // abort the other.
     const tasks: Promise<unknown>[] = [get().restartStream()];
-    if (currentMediaType === 'live' && currentStream.user_login) {
+    if (currentMediaType === 'live' && currentStream.user_login && currentStream.provider !== 'itzon') {
       tasks.push(
         (async () => {
           // Dynamic import to avoid a static cycle (chatConnectionStore imports
@@ -1694,7 +1724,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     try {
       const { currentMediaType, originalMediaUrl } = get();
-      const targetUrl = (currentMediaType !== 'live' && originalMediaUrl) ? originalMediaUrl : `https://twitch.tv/${currentStream.user_login}`;
+      const targetUrl = (currentMediaType !== 'live' && originalMediaUrl) ? originalMediaUrl : liveStreamPageUrl(currentStream);
       const qualities = await invoke('get_stream_qualities', { url: targetUrl }) as string[];
       Logger.debug('[Qualities] Available:', qualities);
       return qualities;
@@ -1731,7 +1761,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ isLoading: true, isRestartingStream: true });
 
       const { currentMediaType, originalMediaUrl } = get();
-      const targetUrl = (currentMediaType !== 'live' && originalMediaUrl) ? originalMediaUrl : `https://twitch.tv/${currentStream.user_login}`;
+      const targetUrl = (currentMediaType !== 'live' && originalMediaUrl) ? originalMediaUrl : liveStreamPageUrl(currentStream);
 
       const result = await invoke<StreamStartResult>('change_stream_quality', {
         url: targetUrl,
@@ -1760,16 +1790,93 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ isLoading: false, isRestartingStream: false });
     }
   },
-  startStream: async (channel, providedStreamInfo?, skipChatRefresh = false) => {
+  startStream: async (channel, providedStreamInfo?, skipChatRefresh = false, requestedProvider?) => {
     set({ isLoading: true });
-    trackActivity(`Started watching: ${channel}`);
+    const provider = requestedProvider ?? providedStreamInfo?.provider ?? 'twitch';
+    trackActivity(`Started watching ${provider}: ${channel}`);
     try {
       const requestedQuality = get().settings.quality;
-      const result = await invoke<StreamStartResult>('start_stream', { url: `https://twitch.tv/${channel}`, quality: requestedQuality });
+      const pageUrl = provider === 'itzon'
+        ? `https://itzon.tv/${channel}`
+        : `https://twitch.tv/${channel}`;
+      const result = await invoke<StreamStartResult>('start_stream', { url: pageUrl, quality: requestedQuality });
       logQualityFallback(requestedQuality, result.quality);
 
       // Use the provided stream info, or find it from followed streams, or fetch it
       let info: TwitchStream;
+
+      if (provider === 'itzon') {
+        if (providedStreamInfo) {
+          info = { ...providedStreamInfo, provider: 'itzon' };
+        } else {
+          const channelInfo = await invoke<{
+            username: string;
+            live: boolean;
+            locked: boolean;
+            partner: boolean;
+            title?: string;
+            category?: string;
+            categoryId?: number;
+            language?: string;
+            mediaBase?: string;
+            thumbnail?: string;
+          }>('get_itzon_channel', { username: channel });
+          const username = channelInfo.username.toLowerCase();
+          const avatar = itzonAvatarUrl(username);
+          info = {
+            provider: 'itzon',
+            id: `itzon:${username}`,
+            user_id: `itzon:${username}`,
+            user_name: channelInfo.username,
+            user_login: username,
+            title: channelInfo.title || `${channelInfo.username} live on itzon`,
+            viewer_count: 0,
+            game_id: channelInfo.categoryId != null ? String(channelInfo.categoryId) : '',
+            game_name: channelInfo.category || 'Live on itzon',
+            thumbnail_url: itzonLiveThumbnailUrl(
+              username,
+              channelInfo.mediaBase,
+              channelInfo.thumbnail,
+            ),
+            profile_image_url: avatar,
+            started_at: '',
+            broadcaster_type: channelInfo.partner ? 'partner' : undefined,
+            is_live: channelInfo.live,
+            tags: channelInfo.language ? [channelInfo.language] : [],
+          };
+        }
+
+        for (const cleanup of eventSubListenerCleanup) cleanup();
+        eventSubListenerCleanup = [];
+        await Promise.allSettled([
+          invoke('disconnect_eventsub'),
+          invoke('stop_drops_monitoring'),
+        ]);
+        set({
+          streamUrl: result.url,
+          activeQuality: result.quality,
+          adSource: null,
+          availableQualities: result.available ?? ['best'],
+          currentStream: info,
+          currentMediaType: 'live',
+          originalMediaUrl: null,
+          currentHypeTrain: null,
+          isHomeActive: false,
+        });
+
+        if (get().settings.discord_rpc_enabled) {
+          void invoke('update_discord_presence', {
+            details: `Watching ${info.user_name}`,
+            activityState: info.title || 'Live on itzon',
+            largeImage: 'icon_256x256',
+            smallImage: '',
+            startTime: Date.now(),
+            gameName: info.game_name || '',
+            streamUrl: pageUrl,
+          }).catch((error) => Logger.warn('[Discord] Could not update itzon presence:', error));
+        }
+        return;
+      }
       
       // First try to find it in followed streams as it has the most complete, live data
       const followedStreamInfo = get().followedStreams.find(s => s.user_login.toLowerCase() === channel.toLowerCase());

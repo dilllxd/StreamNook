@@ -26,12 +26,15 @@ import HypeTrainBanner from '../HypeTrainBanner';
 import { useBlendedHypeTrains } from './useBlendedHypeTrains';
 import { Logger } from '../../utils/logger';
 import { Tooltip } from '../ui/Tooltip';
+import { canSendToProvider, type ProviderSendCapability } from '../../utils/providerSendEligibility';
 
 interface BlendedChannel {
   channel: string;
   provider?: ProviderId;
   channelName: string;
 }
+
+type ProviderSendOutcome = { is_sent: boolean; drop_reason?: string | null };
 
 const noop = () => {};
 
@@ -71,7 +74,7 @@ async function sendTo(
     // invoke passed null ids, which made the backend skip Helix and fall back to an
     // IRC write that doesn't deliver here, so blended sends silently went nowhere.
     const cu = useAppStore.getState().currentUser;
-    if (!cu?.user_id) return;
+    if (!cu?.user_id) throw new Error('Log in to Twitch before sending');
     await sendChannelMessage(
       c.channel,
       text,
@@ -83,19 +86,25 @@ async function sendTo(
       reply?.parentId,
     );
   } else if (prov === 'youtube' && reply) {
-    await invoke('provider_send_message', {
+    const outcome = await invoke<ProviderSendOutcome>('provider_send_message', {
       provider: prov,
       channel: c.channel.toLowerCase(),
       text: `@${reply.parentUser} ${text}`,
       replyTo: null,
     });
+    if (!outcome.is_sent) {
+      throw new Error(outcome.drop_reason || `${prov} did not confirm the message`);
+    }
   } else {
-    await invoke('provider_send_message', {
+    const outcome = await invoke<ProviderSendOutcome>('provider_send_message', {
       provider: prov,
       channel: c.channel.toLowerCase(),
       text,
       replyTo: reply?.parentId ?? null,
     });
+    if (!outcome.is_sent) {
+      throw new Error(outcome.drop_reason || `${prov} did not confirm the message`);
+    }
   }
 }
 
@@ -128,6 +137,7 @@ function Check({ checked, indeterminate }: { checked: boolean; indeterminate?: b
 export function BlendedChatPane({ channels }: { channels: BlendedChannel[] }) {
   // Re-render on any chat update across all channels.
   const revision = useChatConnectionStore((s) => s.revision);
+  const twitchCurrentUser = useAppStore((s) => s.currentUser);
   // Twitch Hype Trains across the blended Twitch sources (blended mounts no per-pane
   // poller, so this drives both the banner here and the activity-feed rows).
   const hypeTrains = useBlendedHypeTrains(channels);
@@ -456,6 +466,7 @@ export function BlendedChatPane({ channels }: { channels: BlendedChannel[] }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [kickConnected, setKickConnected] = useState(false);
   const [youtubeConnected, setYoutubeConnected] = useState(false);
+  const [itzonCapabilities, setItzonCapabilities] = useState<Record<string, ProviderSendCapability>>({});
   // Right-click-a-name reply target. The send routes to THIS source + account,
   // overriding the multi-select for that one message.
   const [replyingTo, setReplyingTo] = useState<{ messageId: string; username: string; channel: BlendedChannel } | null>(
@@ -469,29 +480,37 @@ export function BlendedChatPane({ channels }: { channels: BlendedChannel[] }) {
   const isOn = useCallback((c: BlendedChannel) => !deselected.has(sourceKey(c)), [deselected]);
   const selected = useMemo(() => channels.filter(isOn), [channels, isOn]);
 
-  // Whether we can actually post to a source: Twitch always; Kick/YouTube once
-  // their account is connected; TikTok (and other read-only providers) never.
+  // Whether we can actually post to a source: Twitch only with an OAuth identity;
+  // Kick/YouTube once their account is connected; itzon only while that exact
+  // channel reports a send-ready authenticated connection. Other providers stay
+  // read-only.
   const canSendTo = useCallback(
     (c: BlendedChannel) => {
       const p = provOf(c);
-      if (p === 'twitch') return true;
-      if (p === 'kick') return kickConnected;
-      if (p === 'youtube') return youtubeConnected;
-      return false;
+      return canSendToProvider(p, {
+        twitchUserId: twitchCurrentUser?.user_id,
+        kickConnected,
+        youtubeConnected,
+        itzonCapability: p === 'itzon' ? itzonCapabilities[sourceKey(c)] : undefined,
+      });
     },
-    [kickConnected, youtubeConnected],
+    [twitchCurrentUser?.user_id, kickConnected, youtubeConnected, itzonCapabilities],
   );
   // The per-source picker badge: 'login' (connect to send), 'readonly' (no send
   // path at all), or null (good to go).
   const sendStatus = useCallback(
     (c: BlendedChannel): 'login' | 'readonly' | null => {
       const p = provOf(c);
-      if (p === 'twitch') return null;
+      if (p === 'twitch') return twitchCurrentUser?.user_id ? null : 'login';
       if (p === 'kick') return kickConnected ? null : 'login';
       if (p === 'youtube') return youtubeConnected ? null : 'login';
+      if (p === 'itzon') {
+        const capability = itzonCapabilities[sourceKey(c)] ?? 'needs_login';
+        return capability === 'sendable' ? null : capability === 'needs_login' ? 'login' : 'readonly';
+      }
       return 'readonly';
     },
-    [kickConnected, youtubeConnected],
+    [twitchCurrentUser?.user_id, kickConnected, youtubeConnected, itzonCapabilities],
   );
   const sendableSelected = useMemo(() => selected.filter(canSendTo), [selected, canSendTo]);
 
@@ -561,6 +580,36 @@ export function BlendedChatPane({ channels }: { channels: BlendedChannel[] }) {
       clearInterval(t);
     };
   }, [hasYoutube]);
+
+  const itzonChannels = useMemo(
+    () => channels.filter((c) => provOf(c) === 'itzon'),
+    [channels],
+  );
+  useEffect(() => {
+    if (itzonChannels.length === 0) {
+      setItzonCapabilities({});
+      return;
+    }
+    let active = true;
+    const check = async () => {
+      const entries = await Promise.all(
+        itzonChannels.map(async (channel) => {
+          const capability = await invoke<ProviderSendCapability>('provider_send_capability', {
+            provider: 'itzon',
+            channel: channel.channel.toLowerCase(),
+          }).catch(() => 'read_only' as ProviderSendCapability);
+          return [sourceKey(channel), capability] as const;
+        }),
+      );
+      if (active) setItzonCapabilities(Object.fromEntries(entries));
+    };
+    void check();
+    const timer = setInterval(() => void check(), 2500);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [itzonChannels]);
 
   // Route logins to the Account Connections settings instead of pushing a connect
   // button into the chat space (which shifted the feed). MultiChatWindow listens for

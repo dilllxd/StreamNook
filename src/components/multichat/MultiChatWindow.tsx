@@ -27,7 +27,7 @@ import { ActivityFeedWidget } from '../activity/ActivityFeedWidget';
 import { startActivityNormalizer, stopActivityNormalizer } from '../../services/activityNormalizer';
 import { useActivityStore } from '../../stores/activityStore';
 import { makeKey, parseKey } from '../../utils/providerKey';
-import { PROVIDERS, type ProviderId } from '../../types/providers';
+import { isProviderId, PROVIDERS, type ProviderId } from '../../types/providers';
 import { ProviderLogo } from '../ProviderLogo';
 import { BlendedChatPane } from './BlendedChatPane';
 import ModRoomPane from '../modroom/ModRoomPane';
@@ -73,6 +73,7 @@ import { Tooltip } from '../ui/Tooltip';
 import { Logger } from '../../utils/logger';
 import type { TwitchStream } from '../../types';
 import streamNookLogoUrl from '../../assets/streamnook-logo.png';
+import { getItzonChannel } from '../../services/itzon';
 
 interface ChannelEntry {
   channel: string;
@@ -161,6 +162,7 @@ interface ParsedMultiChatParams {
   channel: string | null;
   channelId: string | null;
   channelName: string | null;
+  provider: ProviderId;
   /** Multi-channel seed (e.g. popping out all MultiNook tiles at once). */
   channels: ChannelEntry[] | null;
   /** Start fresh with only the seeded channels, dropping any persisted tabs. */
@@ -171,7 +173,7 @@ function parseMultiChatParams(): ParsedMultiChatParams {
   const hash = window.location.hash;
   const queryIdx = hash.indexOf('?');
   if (queryIdx === -1)
-    return { id: null, channel: null, channelId: null, channelName: null, channels: null, replace: false };
+    return { id: null, channel: null, channelId: null, channelName: null, provider: 'twitch', channels: null, replace: false };
   const params = new URLSearchParams(hash.slice(queryIdx + 1));
 
   let channels: ChannelEntry[] | null = null;
@@ -182,13 +184,14 @@ function parseMultiChatParams(): ParsedMultiChatParams {
       if (Array.isArray(arr)) {
         channels = arr
           .filter(
-            (c): c is { channel: string; channelId?: string | null; channelName?: string | null } =>
+            (c): c is { channel: string; channelId?: string | null; channelName?: string | null; provider?: ProviderId } =>
               !!c && typeof c === 'object' && typeof (c as { channel?: unknown }).channel === 'string',
           )
           .map((c) => ({
             channel: c.channel.toLowerCase(),
             channelId: c.channelId ?? null,
             channelName: c.channelName || c.channel,
+            provider: c.provider && isProviderId(c.provider) ? c.provider : 'twitch',
           }));
       }
     } catch {
@@ -196,11 +199,13 @@ function parseMultiChatParams(): ParsedMultiChatParams {
     }
   }
 
+  const providerParam = params.get('provider');
   return {
     id: params.get('id'),
     channel: params.get('channel'),
     channelId: params.get('channelId'),
     channelName: params.get('channelName'),
+    provider: providerParam && isProviderId(providerParam) ? providerParam : 'twitch',
     channels,
     replace: params.get('replace') === '1',
   };
@@ -426,6 +431,7 @@ export default function MultiChatWindow() {
                 channel: params.channel.toLowerCase(),
                 channelId: params.channelId,
                 channelName: params.channelName || params.channel.toLowerCase(),
+                provider: params.provider,
               },
             ]
           : [];
@@ -1011,8 +1017,53 @@ export default function MultiChatWindow() {
   }, []);
 
   const addChannel = useCallback(
-    async (rawLogin: string, provider: ProviderId = 'twitch', providedDisplayName?: string) => {
+    async (
+      rawLogin: string,
+      provider: ProviderId = 'twitch',
+      providedDisplayName?: string,
+      providedChannelId?: string,
+    ) => {
       const trimmed = rawLogin.trim();
+      const itzonFromInput = parseItzonInput(trimmed);
+      if (provider === 'itzon' || itzonFromInput) {
+        const slug = (itzonFromInput ?? trimmed.replace(/^itzon[:/]/i, '').replace(/^[@#]/, ''))
+          .trim()
+          .toLowerCase();
+        if (!slug || !/^[a-z0-9_-]{1,64}$/.test(slug)) {
+          setAddError('Enter a valid itzon channel name or channel URL');
+          return;
+        }
+        if (channels.some((c) => c.channel === slug && (c.provider ?? 'twitch') === 'itzon')) {
+          setAddError(`${slug} on itzon is already open`);
+          return;
+        }
+        setAddBusy(true);
+        setAddError(null);
+        try {
+          const channel = await getItzonChannel(slug);
+          const resolvedSlug = channel.username.toLowerCase();
+          setChannels((prev) => [
+            ...prev,
+            {
+              channel: resolvedSlug,
+              channelId: null,
+              channelName: providedDisplayName ?? channel.username,
+              provider: 'itzon',
+            },
+          ]);
+          setActiveKey(makeKey('itzon', resolvedSlug));
+          setAddInput('');
+          setShowAdd(false);
+        } catch (error) {
+          const reason = typeof error === 'string' ? error : error instanceof Error ? error.message : '';
+          const message = `Couldn't add "${slug}" on itzon. ${reason || 'Check the channel name and try again.'}`;
+          setAddError(message);
+          useAppStore.getState().addToast(message, 'error');
+        } finally {
+          setAddBusy(false);
+        }
+        return;
+      }
       // A Kick source: chosen via the provider dropdown, or auto-detected from a
       // pasted kick.com link / "kick:" / "kick/" prefix. Read anonymously over
       // Kick's Pusher socket; no Twitch resolve.
@@ -1134,22 +1185,29 @@ export default function MultiChatWindow() {
         // broadcaster id + properly-cased name AND confirms the channel exists — a
         // failure here is the "that channel isn't real" gate. (An offline-but-valid
         // channel still adds; the pane header shows "OFFLINE CHAT" on its own.)
-        let channelId: string | null = null;
+        // A live-following card already carries Twitch's canonical broadcaster
+        // id. Reuse it so an expired user token does not prevent opening public
+        // read-only chat from a stream that is already visible in discovery.
+        // Typed arbitrary logins still go through Helix so misspellings are not
+        // accepted as permanent dead tabs.
+        let channelId: string | null = providedChannelId?.trim() || null;
         let channelName = providedDisplayName ?? login;
-        try {
-          const user = await invoke<{ id?: string; display_name?: string }>('get_user_by_login', {
-            login,
-          });
-          channelId = user?.id ?? null;
-          if (user?.display_name) channelName = user.display_name;
-        } catch (err) {
-          const reason = typeof err === 'string' ? err : err instanceof Error ? err.message : '';
-          const msg = /not found/i.test(reason)
-            ? `No Twitch channel called "${login}". Check the spelling.`
-            : `Couldn't add "${login}" right now. ${reason || 'Please try again.'}`;
-          setAddError(msg);
-          useAppStore.getState().addToast(msg, 'error');
-          return; // don't add a tab that will never connect
+        if (!channelId) {
+          try {
+            const user = await invoke<{ id?: string; display_name?: string }>('get_user_by_login', {
+              login,
+            });
+            channelId = user?.id ?? null;
+            if (user?.display_name) channelName = user.display_name;
+          } catch (err) {
+            const reason = typeof err === 'string' ? err : err instanceof Error ? err.message : '';
+            const msg = /not found/i.test(reason)
+              ? `No Twitch channel called "${login}". Check the spelling.`
+              : `Couldn't add "${login}" right now. ${reason || 'Please try again.'}`;
+            setAddError(msg);
+            useAppStore.getState().addToast(msg, 'error');
+            return; // don't add a tab that will never connect
+          }
         }
         setChannels((prev) => [...prev, { channel: login, channelId, channelName, provider: 'twitch' }]);
         setActiveKey(makeKey('twitch', login));
@@ -1175,6 +1233,7 @@ export default function MultiChatWindow() {
         channel: entry.channel,
         channelId: entry.channelId ?? undefined,
         channelName: entry.channelName,
+        provider: entry.provider ?? 'twitch',
       });
     } catch (err) {
       Logger.error('[MultiChatWindow] emit watch-channel-in-main failed:', err);
@@ -1242,13 +1301,13 @@ export default function MultiChatWindow() {
           channel: string;
           channelId: string | null;
           channelName: string | null;
+          provider?: ProviderId;
         }>('multichat-add-channel', (event) => {
           const login = (event.payload.channel || '').toLowerCase();
+          const provider = event.payload.provider ?? 'twitch';
           if (!login) return;
           setChannels((prev) => {
-            // Provider-scoped: this pop-out path adds a Twitch chat, so only an
-            // existing TWITCH tab for this login is a duplicate.
-            if (prev.some((c) => c.channel === login && (c.provider ?? 'twitch') === 'twitch'))
+            if (prev.some((c) => c.channel === login && (c.provider ?? 'twitch') === provider))
               return prev;
             return [
               ...prev,
@@ -1256,10 +1315,11 @@ export default function MultiChatWindow() {
                 channel: login,
                 channelId: event.payload.channelId ?? null,
                 channelName: event.payload.channelName || login,
+                provider,
               },
             ];
           });
-          setActiveKey(makeKey('twitch', login));
+          setActiveKey(makeKey(provider, login));
         });
         if (cancelled) {
           // Unmounted before listen resolved (StrictMode): guard the unlisten —
@@ -1289,7 +1349,7 @@ export default function MultiChatWindow() {
       try {
         const { listen } = await import('@tauri-apps/api/event');
         const u = await listen<{
-          channels: Array<{ channel: string; channelId?: string | null; channelName?: string | null }>;
+          channels: Array<{ channel: string; channelId?: string | null; channelName?: string | null; provider?: ProviderId }>;
         }>('multichat-set-channels', (event) => {
           const list = (event.payload.channels || [])
             .filter((c) => c && typeof c.channel === 'string')
@@ -1297,6 +1357,7 @@ export default function MultiChatWindow() {
               channel: c.channel.toLowerCase(),
               channelId: c.channelId ?? null,
               channelName: c.channelName || c.channel,
+              provider: c.provider ?? 'twitch',
             }));
           if (list.length === 0) return;
           setChannels(list);
@@ -1960,7 +2021,7 @@ export default function MultiChatWindow() {
               }}
               onSubmit={() => void addChannel(addInput, addProvider)}
               onSelectStream={(stream) =>
-                void addChannel(stream.user_login, 'twitch', stream.user_name)
+                void addChannel(stream.user_login, 'twitch', stream.user_name, stream.user_id)
               }
               alreadyAdded={channels.map((c) => entryKey(c))}
               error={addError}
@@ -3236,7 +3297,15 @@ interface AddChannelPanelProps {
 // Providers selectable in the add panel today (read-supported). Twitch has rich
 // live-following search; Kick + YouTube are add-by-name / by-link (no public
 // search API to autocomplete).
-const ADDABLE_PROVIDERS: ProviderId[] = ['twitch', 'kick', 'youtube', 'tiktok'];
+const ADDABLE_PROVIDERS: ProviderId[] = ['twitch', 'itzon', 'kick', 'youtube', 'tiktok'];
+
+function parseItzonInput(input: string): string | null {
+  const value = input.trim();
+  const link = value.match(/^(?:https?:\/\/)?(?:www\.)?itzon\.tv\/([a-z0-9_-]+)/i);
+  if (link) return link[1];
+  const prefixed = value.match(/^itzon[:/]([a-z0-9_-]+)$/i);
+  return prefixed ? prefixed[1] : null;
+}
 
 // Extract a stable YouTube source identifier from a pasted link or typed value.
 // Returns `@handle` for a channel (case-insensitive at YouTube) or a verbatim
@@ -3604,7 +3673,7 @@ function EmptyState({
   onApplyGoLive: () => void;
   onStartSetup: () => void;
 }) {
-  const providers: ProviderId[] = ['twitch', 'kick', 'youtube', 'tiktok'];
+  const providers: ProviderId[] = ['twitch', 'itzon', 'kick', 'youtube', 'tiktok'];
   return (
     // Outer fills the chat area (w-full) so the card sits dead-center, not at the
     // flex-start left edge the old content-width layout produced.
@@ -3624,7 +3693,7 @@ function EmptyState({
         <div className="flex flex-col gap-1.5">
           <h2 className="text-xl font-bold tracking-tight text-textPrimary">All your chats, one place</h2>
           <p className="max-w-[300px] text-xs leading-relaxed text-textMuted">
-            Read Twitch, Kick, YouTube, and TikTok chat side by side, or blend them into a single
+            Read Twitch, itzon, Kick, YouTube, and TikTok chat side by side, or blend them into a single
             live feed.
           </p>
         </div>

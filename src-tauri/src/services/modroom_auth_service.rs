@@ -314,7 +314,10 @@ pub async fn list_moderated_channels() -> Result<Vec<String>> {
         for c in body.data {
             out.push(c.broadcaster_id);
         }
-        after = body.pagination.and_then(|p| p.cursor).filter(|s| !s.is_empty());
+        after = body
+            .pagination
+            .and_then(|p| p.cursor)
+            .filter(|s| !s.is_empty());
         if after.is_none() {
             break;
         }

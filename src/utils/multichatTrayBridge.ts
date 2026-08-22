@@ -12,6 +12,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import type { MediaInfo } from '../stores/AppStore';
+import type { ProviderId } from '../types/providers';
 import { Logger } from './logger';
 
 const hash = window.location.hash;
@@ -210,11 +211,11 @@ if (!isPopout && typeof window !== 'undefined') {
       // calling startStream. The popout's auto-hide-main behavior takes over
       // immediately after if it still owns the channel, so this flow is
       // explicitly "no, main should own this channel from now on."
-      await listen<{ channel: string; channelId?: string; channelName?: string }>(
+      await listen<{ channel: string; channelId?: string; channelName?: string; provider?: ProviderId }>(
         'watch-channel-in-main',
         async (event) => {
-          const { channel } = event.payload;
-          Logger.debug(`[TrayBridge] watch-channel-in-main: ${channel}`);
+          const { channel, provider = 'twitch' } = event.payload;
+          Logger.debug(`[TrayBridge] watch-channel-in-main: ${provider}:${channel}`);
           try {
             const { getCurrentWindow } = await import('@tauri-apps/api/window');
             const win = getCurrentWindow();
@@ -226,7 +227,7 @@ if (!isPopout && typeof window !== 'undefined') {
           }
           try {
             const { useAppStore } = await import('../stores/AppStore');
-            await useAppStore.getState().startStream(channel);
+            await useAppStore.getState().startStream(channel, undefined, false, provider);
           } catch (err) {
             Logger.error('[TrayBridge] startStream failed:', err);
           }

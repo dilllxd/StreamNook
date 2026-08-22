@@ -433,6 +433,8 @@ pub struct CompactViewSettings {
 #[serde(rename_all = "camelCase")]
 pub struct MultiNookSlot {
     pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
     pub channel_login: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub channel_id: Option<String>,

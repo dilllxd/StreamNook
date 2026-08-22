@@ -192,9 +192,8 @@ impl SignatureGenerator {
                             * 32.0
                             / peak_variation_1;
 
-                        let corrected_peak_frequency_bin: u16 = (
-                            (bin_position as i32 * 64) + (peak_variation_2 as i32)
-                        ) as u16;
+                        let corrected_peak_frequency_bin: u16 =
+                            ((bin_position as i32 * 64) + (peak_variation_2 as i32)) as u16;
 
                         assert!(peak_variation_1 >= 0.0);
 
@@ -219,7 +218,8 @@ impl SignatureGenerator {
                             }
                         };
 
-                        self.signature.frequency_band_to_sound_peaks
+                        self.signature
+                            .frequency_band_to_sound_peaks
                             .entry(frequency_band)
                             .or_default();
 

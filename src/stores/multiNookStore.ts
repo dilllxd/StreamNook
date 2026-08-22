@@ -2,6 +2,10 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppStore } from './AppStore';
 import { MultiNookSlot, MultiNookPresetChannel } from '../types';
+import type { ProviderId } from '../types/providers';
+import { DEFAULT_PROVIDER } from '../types/providers';
+import { makeKey } from '../utils/providerKey';
+import { getItzonChannel, getItzonExplore, itzonAvatarUrl } from '../services/itzon';
 import { Logger } from '../utils/logger';
 
 /** Slot ids whose proxy start is currently in flight. The loader effect re-fires
@@ -10,22 +14,34 @@ import { Logger } from '../utils/logger';
  *  stream on each sibling that resolves). */
 const inFlightStarts = new Set<string>();
 
-/** True if `activeId` still matches one of the current slots (by channel id or
- *  login — the chat switcher stores either form). */
+const slotProvider = (slot: Pick<MultiNookSlot, 'provider'>): ProviderId =>
+  slot.provider ?? DEFAULT_PROVIDER;
+
+const sourceKey = (provider: ProviderId | undefined, channel: string): string =>
+  makeKey(provider ?? DEFAULT_PROVIDER, channel);
+
+/** Stable selection identity. Twitch preserves its historical numeric-id/login
+ * shape; every other provider uses the composite source key so equal channel
+ * names on two platforms never select the wrong chat. */
+const chatKeyForSlot = (slot: MultiNookSlot): string =>
+  slotProvider(slot) === 'twitch'
+    ? slot.channelId ?? slot.channelLogin
+    : sourceKey(slot.provider, slot.channelLogin);
+
+/** True if `activeId` still matches one of the current provider-aware slots. */
 function isActiveChatValid(slots: MultiNookSlot[], activeId: string | null): boolean {
   if (!activeId) return false;
-  return slots.some((s) => s.channelId === activeId || s.channelLogin === activeId);
+  return slots.some((slot) => chatKeyForSlot(slot) === activeId);
 }
 
 /** Pick which chat to select: the focused (non-minimized) slot, else the first
- *  visible slot, else the first slot. Returns its channel id, or login when the
- *  id hasn't resolved yet (ChatWidget matches either). null only when empty. */
+ *  visible slot, else the first slot. null only when empty. */
 function pickActiveChatChannel(slots: MultiNookSlot[]): string | null {
   if (slots.length === 0) return null;
   const visible = slots.filter((s) => !s.isMinimized);
   const pool = visible.length > 0 ? visible : slots;
   const choice = pool.find((s) => s.isFocused) ?? pool[0];
-  return choice?.channelId ?? choice?.channelLogin ?? null;
+  return choice ? chatKeyForSlot(choice) : null;
 }
 
 export const broadcastMultiNookPresence = (slots: MultiNookSlot[]) => {
@@ -116,11 +132,11 @@ interface MultiNookState {
   
   // Actions
   toggleMultiNook: () => void;
-  triggerAddAnimation: (x: number, y: number, channelLogin: string) => void;
-  triggerRecallAnimation: (channelLogin: string, cardX: number, cardY: number) => void;
-  addSlot: (channelLogin: string) => Promise<void>;
+  triggerAddAnimation: (x: number, y: number, channelLogin: string, provider?: ProviderId) => void;
+  triggerRecallAnimation: (channelLogin: string, cardX: number, cardY: number, provider?: ProviderId) => void;
+  addSlot: (channelLogin: string, provider?: ProviderId) => Promise<void>;
   removeSlot: (id: string) => Promise<void>;
-  removeSlotByLogin: (channelLogin: string) => Promise<void>;
+  removeSlotByLogin: (channelLogin: string, provider?: ProviderId) => Promise<void>;
   updateSlot: (id: string, updates: Partial<MultiNookSlot>) => void;
   changeSlotQuality: (id: string, quality: string) => Promise<void>;
   retrySlot: (id: string) => void;
@@ -190,7 +206,11 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
         try {
           const url = await invoke<string>('start_multi_nook', {
             streamId: slot.id,
-            url: `https://twitch.tv/${slot.channelLogin}`,
+            provider: slotProvider(slot),
+            url:
+              slotProvider(slot) === 'itzon'
+                ? `https://itzon.tv/${slot.channelLogin}`
+                : `https://twitch.tv/${slot.channelLogin}`,
             quality: slot.quality || 'best', // Per-tile quality (set via the focused tile's gear menu)
           });
           set((state) => ({
@@ -211,34 +231,57 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
   },
 
   refreshSlotMetadata: async () => {
-    const logins = Array.from(
-      new Set(get().slots.map((s) => s.channelLogin.toLowerCase())),
-    ).filter(Boolean);
-    if (logins.length === 0) return;
+    const slots = get().slots;
+    if (slots.length === 0) return;
 
-    // Keyed on channelLogin, not channelId: the id is optional on a slot (a
-    // preset carries whatever was cached when it was saved), so a broadcaster_id
-    // batch would silently skip those tiles. The login is the required key.
-    // No chunking needed — the grid is hard-capped at 25, well under Helix's 100.
-    let byLogin: Map<string, { title?: string; game_name?: string }>;
-    try {
-      const [clientId, token] = await invoke<[string, string]>('get_twitch_credentials');
-      const qs = logins.map((l) => `user_login=${encodeURIComponent(l)}`).join('&');
-      const resp = await fetch(`https://api.twitch.tv/helix/streams?${qs}`, {
-        headers: { 'Client-ID': clientId, Authorization: `Bearer ${token}` },
-      });
-      if (!resp.ok) return;
-      const data = await resp.json();
-      byLogin = new Map(
-        (data.data || []).map((s: { user_login?: string; title?: string; game_name?: string }) => [
-          (s.user_login || '').toLowerCase(),
-          { title: s.title, game_name: s.game_name },
-        ]),
-      );
-    } catch (e) {
-      Logger.warn('[multiNookStore] Failed to refresh slot titles', e);
-      return;
-    }
+    const twitchLogins = Array.from(
+      new Set(
+        slots
+          .filter((slot) => slotProvider(slot) === 'twitch')
+          .map((slot) => slot.channelLogin.toLowerCase()),
+      ),
+    ).filter(Boolean);
+    const hasItzon = slots.some((slot) => slotProvider(slot) === 'itzon');
+
+    let twitchByLogin: Map<string, { title?: string; game_name?: string }> | null = null;
+    let itzonByLogin: Map<string, { title?: string; category?: string }> | null = null;
+
+    await Promise.all([
+      (async () => {
+        if (twitchLogins.length === 0) return;
+        try {
+          const [clientId, token] = await invoke<[string, string]>('get_twitch_credentials');
+          const qs = twitchLogins.map((login) => `user_login=${encodeURIComponent(login)}`).join('&');
+          const response = await fetch(`https://api.twitch.tv/helix/streams?${qs}`, {
+            headers: { 'Client-ID': clientId, Authorization: `Bearer ${token}` },
+          });
+          if (!response.ok) return;
+          const data = await response.json();
+          twitchByLogin = new Map(
+            (data.data || []).map((stream: { user_login?: string; title?: string; game_name?: string }) => [
+              (stream.user_login || '').toLowerCase(),
+              { title: stream.title, game_name: stream.game_name },
+            ]),
+          );
+        } catch (error) {
+          Logger.warn('[multiNookStore] Failed to refresh Twitch slot metadata', error);
+        }
+      })(),
+      (async () => {
+        if (!hasItzon) return;
+        try {
+          const explore = await getItzonExplore();
+          itzonByLogin = new Map(
+            explore.streams.map((stream) => [
+              stream.username.toLowerCase(),
+              { title: stream.title, category: stream.category },
+            ]),
+          );
+        } catch (error) {
+          Logger.warn('[multiNookStore] Failed to refresh itzon slot metadata', error);
+        }
+      })(),
+    ]);
 
     // Preserve object identity for every tile that didn't actually change: each
     // cell is memoized on its slot's reference, so spreading unconditionally
@@ -246,7 +289,13 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     // branch — a tile with no title must come back as the *same* object.
     let changed = false;
     const next = get().slots.map((s) => {
-      const live = byLogin.get(s.channelLogin.toLowerCase());
+      const provider = slotProvider(s);
+      const live =
+        provider === 'itzon'
+          ? itzonByLogin?.get(s.channelLogin.toLowerCase())
+          : twitchByLogin?.get(s.channelLogin.toLowerCase());
+      const requestCompleted = provider === 'itzon' ? itzonByLogin !== null : twitchByLogin !== null;
+      if (!requestCompleted) return s;
       if (!live) {
         // Absent from the response means offline. Drop the title (a stale live
         // title on an offline tile is wrong) but keep the last known category.
@@ -255,7 +304,10 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
         return { ...s, title: undefined };
       }
       const title = live.title || undefined;
-      const gameName = live.game_name || s.gameName;
+      const gameName =
+        (provider === 'itzon'
+          ? (live as { category?: string }).category
+          : (live as { game_name?: string }).game_name) || s.gameName;
       if (s.title === title && s.gameName === gameName) return s;
       changed = true;
       return { ...s, title, gameName };
@@ -278,6 +330,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
       new Set(
         get()
           .slots.filter((s) => s.broadcasterType === undefined)
+          .filter((s) => slotProvider(s) === 'twitch')
           .map((s) => s.channelLogin.toLowerCase()),
       ),
     ).filter(Boolean);
@@ -307,6 +360,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     // get a new object, so this never re-renders the whole grid.
     let changed = false;
     const next = get().slots.map((s) => {
+      if (slotProvider(s) !== 'twitch') return s;
       if (s.broadcasterType !== undefined) return s;
       const type = byLogin.get(s.channelLogin.toLowerCase());
       if (type === undefined) return s;
@@ -318,10 +372,10 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
   },
 
   loadPresetChannels: async (channels, mode, presetId) => {
-    // Drop duplicate logins inside the preset itself, preserving order.
+    // Drop duplicate provider/channel pairs inside the preset itself, preserving order.
     const seen = new Set<string>();
     const unique = channels.filter((ch) => {
-      const key = ch.channelLogin.toLowerCase();
+      const key = sourceKey(ch.provider, ch.channelLogin);
       if (!key || seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -331,7 +385,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
       // Reuse the single-add path so dedup-against-grid, the 25 cap, proxy start,
       // and fresh Twitch metadata enrichment all behave exactly like a manual add.
       for (const ch of unique) {
-        await get().addSlot(ch.channelLogin);
+        await get().addSlot(ch.channelLogin, ch.provider);
       }
       return;
     }
@@ -346,7 +400,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
       Logger.error('[MultiNook] Failed to stop proxies before loading preset', e);
     }
     for (const slot of outgoing) {
-      if (slot.channelId) {
+      if (slotProvider(slot) === 'twitch' && slot.channelId) {
         invoke('unregister_active_channel', { channelId: slot.channelId }).catch(() => {});
       }
     }
@@ -366,6 +420,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     const base = Date.now();
     const newSlots: MultiNookSlot[] = capped.map((ch, i) => ({
       id: `cell-${base}-${i}`,
+      provider: ch.provider ?? DEFAULT_PROVIDER,
       channelLogin: ch.channelLogin,
       channelId: ch.channelId || undefined,
       channelName: ch.channelName || ch.channelLogin,
@@ -382,7 +437,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     set({ slots: newSlots, activeChatChannelId: pickActiveChatChannel(newSlots), activePresetId: presetId ?? null, maximizedSlotId: null });
 
     for (const slot of newSlots) {
-      if (slot.channelId) {
+      if (slotProvider(slot) === 'twitch' && slot.channelId) {
         invoke('register_active_channel', { channelId: slot.channelId }).catch(() => {});
       }
     }
@@ -410,7 +465,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
       Logger.error('[MultiNook] Failed to stop proxies on clearAllSlots', e);
     }
     for (const slot of current) {
-      if (slot.channelId) {
+      if (slotProvider(slot) === 'twitch' && slot.channelId) {
         invoke('unregister_active_channel', { channelId: slot.channelId }).catch(() => {});
       }
     }
@@ -424,17 +479,18 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     await get().saveSlots();
   },
 
-  triggerAddAnimation: (x: number, y: number, channelLogin: string) => {
+  triggerAddAnimation: (x: number, y: number, channelLogin: string, provider = DEFAULT_PROVIDER) => {
     const id = Date.now();
+    const key = sourceKey(provider, channelLogin);
     // Start suck-up immediately, delay flying dot until card dissolve finishes (350ms)
-    set({ suckUpLogin: channelLogin.toLowerCase() });
+    set({ suckUpLogin: key });
     // Spawn flying dot after suck-up animation completes
     setTimeout(() => {
       set({ flyingAnimation: { x, y, id } });
     }, 350);
     // Clear suckUpLogin after suck-up animation finishes so card transitions to ghost
     setTimeout(() => {
-      if (get().suckUpLogin === channelLogin.toLowerCase()) {
+      if (get().suckUpLogin === key) {
         set({ suckUpLogin: null });
       }
     }, 400);
@@ -446,9 +502,10 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     }, 1400);
   },
 
-  triggerRecallAnimation: (channelLogin: string, cardX: number, cardY: number) => {
+  triggerRecallAnimation: (channelLogin: string, cardX: number, cardY: number, provider = DEFAULT_PROVIDER) => {
     const id = Date.now();
     const login = channelLogin.toLowerCase();
+    const key = sourceKey(provider, login);
     
     // Get the MultiNook badge position as the flying dot source
     const badgeBtn = document.getElementById('multinook-return-button');
@@ -457,10 +514,10 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     const sourceY = badgeRect ? badgeRect.top - 5 : 0;
     
     // Set materializing FIRST — card will render content but CSS animation-delay holds it invisible
-    set({ materializingLogin: login });
+    set({ materializingLogin: key });
     
     // Then remove the slot — card is no longer "queued" but materializingLogin keeps it in animation mode
-    get().removeSlotByLogin(login);
+    get().removeSlotByLogin(login, provider);
     
     // Spawn reverse flying dot from badge → card position
     set({ recallAnimation: { sourceX, sourceY, targetX: cardX, targetY: cardY, id } });
@@ -474,7 +531,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     
     // Clear materializing after animation-delay (550ms) + animation duration (350ms) completes
     setTimeout(() => {
-      if (get().materializingLogin === login) {
+      if (get().materializingLogin === key) {
         set({ materializingLogin: null });
       }
     }, 950);
@@ -498,8 +555,9 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     }));
   },
 
-  removeSlotByLogin: async (channelLogin: string) => {
-    const slot = get().slots.find(s => s.channelLogin.toLowerCase() === channelLogin.toLowerCase());
+  removeSlotByLogin: async (channelLogin: string, provider = DEFAULT_PROVIDER) => {
+    const key = sourceKey(provider, channelLogin);
+    const slot = get().slots.find((candidate) => sourceKey(candidate.provider, candidate.channelLogin) === key);
     if (slot) {
       await get().removeSlot(slot.id);
     }
@@ -533,7 +591,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
         if (currentSlots.length > 0) {
           broadcastMultiNookPresence(currentSlots);
           for (const slot of currentSlots) {
-            if (slot.channelId) {
+            if (slotProvider(slot) === 'twitch' && slot.channelId) {
                invoke('register_active_channel', { channelId: slot.channelId }).catch(() => {});
             }
           }
@@ -549,7 +607,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
       
       const currentSlots = get().slots;
       for (const slot of currentSlots) {
-        if (slot.channelId) {
+        if (slotProvider(slot) === 'twitch' && slot.channelId) {
            invoke('unregister_active_channel', { channelId: slot.channelId }).catch(() => {});
         }
       }
@@ -571,14 +629,17 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     set({ isMultiNookActive: newState });
   },
 
-  addSlot: async (channelLogin: string) => {
+  addSlot: async (channelLogin: string, provider = DEFAULT_PROVIDER) => {
+    channelLogin = channelLogin.trim();
+    if (!channelLogin) return;
     if (get().slots.length >= 25) {
       useAppStore.getState().addToast('Maximum of 25 streams reached', 'warning');
       return;
     }
     
-    if (get().slots.some(s => s.channelLogin.toLowerCase() === channelLogin.toLowerCase())) {
-      useAppStore.getState().addToast(`${channelLogin} is already in the view`, 'info');
+    const key = sourceKey(provider, channelLogin);
+    if (get().slots.some((slot) => sourceKey(slot.provider, slot.channelLogin) === key)) {
+      useAppStore.getState().addToast(`${key} is already in the view`, 'info');
       return;
     }
 
@@ -589,55 +650,66 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     let resolvedTitle = '';
     let resolvedBroadcasterType = '';
     try {
-      const [clientId, token] = await invoke<[string, string]>('get_twitch_credentials');
-      const response = await fetch(`https://api.twitch.tv/helix/users?login=${channelLogin}`, {
-        headers: {
-          'Client-ID': clientId,
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.data && data.data.length > 0) {
-          resolvedId = data.data[0].id;
-          resolvedName = data.data[0].display_name;
-          resolvedImage = data.data[0].profile_image_url;
-          resolvedBroadcasterType = data.data[0].broadcaster_type;
+      if (provider === 'itzon') {
+        const channel = await getItzonChannel(channelLogin);
+        channelLogin = channel.username.toLowerCase();
+        resolvedId = sourceKey('itzon', channelLogin);
+        resolvedName = channel.username;
+        resolvedImage = itzonAvatarUrl(channelLogin);
+        resolvedGameName = channel.category || '';
+        resolvedTitle = channel.title || '';
+        resolvedBroadcasterType = channel.partner ? 'partner' : '';
+      } else {
+        const [clientId, token] = await invoke<[string, string]>('get_twitch_credentials');
+        const response = await fetch(`https://api.twitch.tv/helix/users?login=${channelLogin}`, {
+          headers: {
+            'Client-ID': clientId,
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.data && data.data.length > 0) {
+            resolvedId = data.data[0].id;
+            resolvedName = data.data[0].display_name;
+            resolvedImage = data.data[0].profile_image_url;
+            resolvedBroadcasterType = data.data[0].broadcaster_type;
 
-          // Fetch channel info to get the current category and stream title
-          try {
-            const channelResponse = await fetch(`https://api.twitch.tv/helix/channels?broadcaster_id=${resolvedId}`, {
-              headers: {
-                'Client-ID': clientId,
-                'Authorization': `Bearer ${token}`
+            try {
+              const channelResponse = await fetch(`https://api.twitch.tv/helix/channels?broadcaster_id=${resolvedId}`, {
+                headers: {
+                  'Client-ID': clientId,
+                  'Authorization': `Bearer ${token}`
+                }
+              });
+              if (channelResponse.ok) {
+                const channelData = await channelResponse.json();
+                if (channelData.data && channelData.data.length > 0) {
+                  resolvedGameName = channelData.data[0].game_name;
+                  resolvedTitle = channelData.data[0].title;
+                }
               }
-            });
-            if (channelResponse.ok) {
-              const channelData = await channelResponse.json();
-              if (channelData.data && channelData.data.length > 0) {
-                resolvedGameName = channelData.data[0].game_name;
-                resolvedTitle = channelData.data[0].title;
-              }
+            } catch (e) {
+              Logger.warn('[multiNookStore] Failed to fetch Twitch channel metadata', e);
             }
-          } catch (e) {
-            Logger.warn('[multiNookStore] Failed to fetch channel info for game name', e);
           }
         }
       }
     } catch (e) {
-      Logger.warn('[multiNookStore] Failed to resolve channel details for', channelLogin, e);
+      Logger.warn(`[multiNookStore] Failed to resolve ${provider} channel details for`, channelLogin, e);
     }
 
     // Capture latest state AFTER async operations to prevent race conditions from concurrent adds
     const { slots, saveSlots } = get();
     
     // Double check it wasn't added concurrently while we were fetching
-    if (slots.some(s => s.channelLogin.toLowerCase() === channelLogin.toLowerCase())) {
+    if (slots.some((slot) => sourceKey(slot.provider, slot.channelLogin) === sourceKey(provider, channelLogin))) {
       return;
     }
 
     const newSlot: MultiNookSlot = {
       id: `cell-${Date.now()}`,
+      provider,
       channelLogin,
       channelId: resolvedId || undefined,
       channelName: resolvedName || channelLogin,
@@ -656,10 +728,10 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     // Keep a chat selected: if nothing valid is selected yet (first slot, or the
     // previous selection is gone), focus the slot we just added.
     if (!isActiveChatValid(newSlots, get().activeChatChannelId)) {
-       set({ activeChatChannelId: newSlot.channelId ?? newSlot.channelLogin });
+       set({ activeChatChannelId: pickActiveChatChannel(newSlots) });
     }
     
-    if (newSlot.channelId) {
+    if (provider === 'twitch' && newSlot.channelId) {
        invoke('register_active_channel', { channelId: newSlot.channelId }).catch(() => {});
     }
     // The mod view (EventSub channel.moderate) follows the chat connection now,
@@ -682,7 +754,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
       }
     }
     
-    if (slotToRemove?.channelId) {
+    if (slotToRemove && slotProvider(slotToRemove) === 'twitch' && slotToRemove.channelId) {
        invoke('unregister_active_channel', { channelId: slotToRemove.channelId }).catch(() => {});
     }
 
@@ -798,8 +870,8 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     saveSlots();
     
     // Jump chat focus to this slot if we are focusing it
-    if (!isCurrentlyFocused && slot.channelId) {
-       set({ activeChatChannelId: slot.channelId });
+    if (!isCurrentlyFocused) {
+       set({ activeChatChannelId: chatKeyForSlot(slot) });
     }
   },
 
@@ -827,9 +899,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     saveSlots();
 
     // Move chat to the maximized stream so chat matches what you're watching.
-    if (slot.channelId) {
-      set({ activeChatChannelId: slot.channelId });
-    }
+    set({ activeChatChannelId: chatKeyForSlot(slot) });
   },
 
   setMaximizedSlot: (id: string | null) => {
@@ -916,9 +986,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     set(get().maximizedSlotId ? { slots: newSlots, maximizedSlotId: null } : { slots: newSlots });
     saveSlots();
 
-    if (slotToRestore.channelId) {
-      set({ activeChatChannelId: slotToRestore.channelId });
-    }
+    set({ activeChatChannelId: chatKeyForSlot(slotToRestore) });
   },
 
   setActiveChatChannelId: (id: string | null) => {
@@ -952,7 +1020,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
       if (appSettings.multi_nook_slots && Array.isArray(appSettings.multi_nook_slots)) {
         // Clean up old minimized state on load - anything that was explicitly minimized
         const cleanedSlots = appSettings.multi_nook_slots.map(s => {
-          const cleaned = { ...s };
+          const cleaned = { ...s, provider: s.provider ?? DEFAULT_PROVIDER };
           delete cleaned.streamUrl;
           delete cleaned.loadError;
           delete cleaned.title;
@@ -972,7 +1040,11 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
         // up to 100 logins) and persist the fresh values.
         void (async () => {
           const logins = Array.from(
-            new Set(cleanedSlots.map((s) => s.channelLogin.toLowerCase())),
+            new Set(
+              cleanedSlots
+                .filter((slot) => slotProvider(slot) === 'twitch')
+                .map((slot) => slot.channelLogin.toLowerCase()),
+            ),
           ).filter(Boolean);
           if (logins.length === 0) return;
           try {
@@ -987,6 +1059,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
             for (const u of data.data || []) byLogin.set((u.login || '').toLowerCase(), u);
             let changed = false;
             const next = get().slots.map((s) => {
+              if (slotProvider(s) !== 'twitch') return s;
               const u = byLogin.get(s.channelLogin.toLowerCase());
               if (!u || !u.profile_image_url) return s;
               if (

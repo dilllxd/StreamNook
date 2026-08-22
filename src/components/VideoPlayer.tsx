@@ -10,12 +10,14 @@ import { Heart, HeartBreak, ArrowLeft, X as XIcon } from 'phosphor-react';
 import { useAppStore } from '../stores/AppStore';
 import { useContextMenuStore } from '../stores/contextMenuStore';
 import { buildShareUrl } from '../utils/shareLink';
+import { makeKey } from '../utils/providerKey';
 import { usemultiNookStore } from '../stores/multiNookStore';
 import { useChannelSocial } from '../hooks/useChannelSocial';
 import StreamTitleWithEmojis from './StreamTitleWithEmojis';
 import PlayerStatsOverlay from './PlayerStatsOverlay';
 import { Tooltip } from './ui/Tooltip';
 import { TwitchVerifiedMark } from './ui/TwitchGlyph';
+import { ProviderLogo } from './ProviderLogo';
 import { registerPlayerControls, type PlayerControls } from '../keybindings';
 import { qualitiesEquivalent } from '../utils/quality';
 
@@ -115,11 +117,14 @@ const VideoPlayer = () => {
       originalMediaUrl: s.originalMediaUrl,
     })),
   );
+  const currentProvider = currentStream?.provider ?? 'twitch';
+  const isTwitchStream = currentProvider === 'twitch';
   // Clippable: a live broadcast, or any VOD that's loaded — including the latest
   // VOD auto-loaded into the offline-chat space (still currentMediaType
   // 'offline_chat', but a real VOD is playing, exposed via originalMediaUrl).
-  const canClip =
-    currentMediaType === 'live' || (!!originalMediaUrl && /\/videos\/\d+/.test(originalMediaUrl));
+  const canClip = isTwitchStream && (
+    currentMediaType === 'live' || (!!originalMediaUrl && /\/videos\/\d+/.test(originalMediaUrl))
+  );
   // A clip is playing in the centered overlay modal. The live stream keeps
   // playing underneath, so mute it while the modal is open to avoid two audio
   // tracks at once; restore the prior mute state on close.
@@ -344,9 +349,9 @@ const VideoPlayer = () => {
     subscriberBadgeUrl,
     handleSubscribeClick,
   } = useChannelSocial({
-    userId: currentStream?.user_id,
-    userLogin: currentStream?.user_login,
-    userName: currentStream?.user_name,
+    userId: isTwitchStream ? currentStream?.user_id : undefined,
+    userLogin: isTwitchStream ? currentStream?.user_login : undefined,
+    userName: isTwitchStream ? currentStream?.user_name : undefined,
   });
 
   // Restart stream state
@@ -401,7 +406,11 @@ const VideoPlayer = () => {
   const handleSharePlayer = async () => {
     if (!currentStream?.user_login) return;
     try {
-      await navigator.clipboard.writeText(buildShareUrl(currentStream.user_login));
+      await navigator.clipboard.writeText(
+        currentProvider === 'itzon'
+          ? `https://itzon.tv/${currentStream.user_login}`
+          : buildShareUrl(currentStream.user_login),
+      );
       setShareCopied(true);
       window.setTimeout(() => setShareCopied(false), 1400);
     } catch (err) {
@@ -2076,9 +2085,10 @@ const VideoPlayer = () => {
     if (!stream?.user_login) return;
 
     const login = stream.user_login;
+    const provider = stream.provider ?? 'twitch';
     const mn = usemultiNookStore.getState();
     const alreadyPresent = mn.slots.some(
-      (s) => s.channelLogin.toLowerCase() === login.toLowerCase()
+      (s) => s.channelLogin.toLowerCase() === login.toLowerCase() && (s.provider ?? 'twitch') === provider
     );
 
     // MultiNook holds at most 25 tiles. addSlot enforces this too (with its own
@@ -2092,13 +2102,15 @@ const VideoPlayer = () => {
     // Await the add so slots is non-empty before we toggle. Otherwise
     // toggleMultiNook treats this as an empty entry and reloads the stored
     // lineup, dropping the channel we just added.
-    await mn.addSlot(login);
+    await mn.addSlot(login, provider);
 
     // Focus MultiNook chat on the channel we came from. The chat hook keys on
     // the active channel's login, so keeping it on this same channel means the
     // chat connection carries straight over instead of churning to another tile.
     if (stream.user_id) {
-      usemultiNookStore.getState().setActiveChatChannelId(stream.user_id);
+      usemultiNookStore.getState().setActiveChatChannelId(
+        provider === 'twitch' ? stream.user_id : makeKey(provider, login),
+      );
     }
 
     // Enter the grid BEFORE tearing down the solo stream so the chat hook never
@@ -2136,7 +2148,7 @@ const VideoPlayer = () => {
       // Right-clicking the video opens the same stream menu as a tile/sidebar
       // entry (Share, Favorite, Follow, ...), scoped to the channel that's playing.
       onContextMenu={(e) => {
-        if (currentStream) {
+        if (currentStream && isTwitchStream) {
           useContextMenuStore.getState().openMenu(e, currentStream);
         } else {
           e.preventDefault();
@@ -2392,8 +2404,14 @@ const VideoPlayer = () => {
                 <span className="text-white text-[13.5px] font-semibold truncate min-w-0 drop-shadow-lg">
                   {currentStream.user_name || currentStream.user_login}
                 </span>
-                {currentStream.broadcaster_type === 'partner' && (
+                {isTwitchStream && currentStream.broadcaster_type === 'partner' && (
                   <TwitchVerifiedMark size={13} className="text-[#9146FF] shrink-0" />
+                )}
+                {currentProvider === 'itzon' && (
+                  <span className="inline-flex items-center gap-1 rounded bg-black/75 px-1.5 py-0.5 text-[9px] font-bold text-white">
+                    <ProviderLogo provider="itzon" size={10} />
+                    ITZON
+                  </span>
                 )}
               </div>
               {currentStream.title?.trim() && (
@@ -2444,7 +2462,7 @@ const VideoPlayer = () => {
             className="subscribe-overlay absolute top-3 right-3 z-50 flex items-center gap-2"
           >
           {/* Follow Button - Icon Only with Glow */}
-          {overlayButtonOn('follow') && (
+          {isTwitchStream && overlayButtonOn('follow') && (
           <Tooltip content={checkingFollowStatus
                 ? 'Checking follow status...'
                 : followLoading
@@ -2484,7 +2502,7 @@ const VideoPlayer = () => {
           )}
 
           {/* Subscribe Button */}
-          {overlayButtonOn('subscribe') && (
+          {isTwitchStream && overlayButtonOn('subscribe') && (
           <Tooltip content={isSubscribed
                 ? `Gift a sub to ${currentStream.user_name}'s community`
                 : hasSubHistory
@@ -2578,7 +2596,7 @@ const VideoPlayer = () => {
 
           {/* Clips & VODs — opens this streamer's clip/VOD library. Text label,
               no icon (the label speaks for itself, so no tooltip either). */}
-          {overlayButtonOn('clipsvods') && currentStream && currentStream.user_id && (
+          {isTwitchStream && overlayButtonOn('clipsvods') && currentStream && currentStream.user_id && (
             <button
               onClick={() => openStreamerMedia(currentStream)}
               className="flex items-center justify-center px-3 py-2 glass-button rounded-lg text-sm font-semibold text-white hover:text-accent transition-colors duration-200"

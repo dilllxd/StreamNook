@@ -375,7 +375,11 @@ static GLOBAL_BADGES_LOCK: Lazy<TokioMutex<()>> = Lazy::new(|| TokioMutex::new((
 fn derive_badge_image_urls(url: &str) -> (String, String, String) {
     for suffix in ["/1", "/2", "/3"] {
         if let Some(base) = url.strip_suffix(suffix) {
-            return (format!("{base}/1"), format!("{base}/2"), format!("{base}/3"));
+            return (
+                format!("{base}/1"),
+                format!("{base}/2"),
+                format!("{base}/3"),
+            );
         }
     }
     (url.to_string(), url.to_string(), url.to_string())
@@ -407,8 +411,8 @@ pub async fn merge_pushed_badge_into_global_cache(
         Ok(Some(c)) => c,
         _ => return Ok(false),
     };
-    let mut cached_data: CachedBadgesData = serde_json::from_value(cached.data)
-        .map_err(|e| format!("parse cached badges: {e}"))?;
+    let mut cached_data: CachedBadgesData =
+        serde_json::from_value(cached.data).map_err(|e| format!("parse cached badges: {e}"))?;
 
     let (u1, u2, u4) = derive_badge_image_urls(&badge.badge_image_url);
     let version = HelixBadgeVersion {
@@ -468,14 +472,14 @@ pub async fn prune_invalid_global_badges() -> Result<usize, String> {
         Ok(Some(c)) => c,
         _ => return Ok(0),
     };
-    let mut cached_data: CachedBadgesData = serde_json::from_value(cached.data)
-        .map_err(|e| format!("parse cached badges: {e}"))?;
+    let mut cached_data: CachedBadgesData =
+        serde_json::from_value(cached.data).map_err(|e| format!("parse cached badges: {e}"))?;
 
     let before = cached_data.badges.data.len();
     cached_data.badges.data.retain(|set| {
-        set.versions
-            .iter()
-            .any(|v| is_twitch_badge_image(&v.image_url_4x) || is_twitch_badge_image(&v.image_url_1x))
+        set.versions.iter().any(|v| {
+            is_twitch_badge_image(&v.image_url_4x) || is_twitch_badge_image(&v.image_url_1x)
+        })
     });
     let removed = before - cached_data.badges.data.len();
     if removed == 0 {

@@ -1139,8 +1139,7 @@ impl EmoteService {
                                 .await
                             {
                                 Some(set_resp) => {
-                                    if let Ok(set_json) =
-                                        set_resp.json::<serde_json::Value>().await
+                                    if let Ok(set_json) = set_resp.json::<serde_json::Value>().await
                                     {
                                         if let Some(items) =
                                             set_json.get("emotes").and_then(|v| v.as_array())
@@ -1293,8 +1292,7 @@ impl EmoteService {
                                     set_data.get("emoticons").and_then(|v| v.as_array())
                                 {
                                     for item in emoticons {
-                                        if let Some(emote) = Self::parse_ffz_emoticon(item, false)
-                                        {
+                                        if let Some(emote) = Self::parse_ffz_emoticon(item, false) {
                                             emotes.push(emote);
                                         }
                                     }

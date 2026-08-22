@@ -9,9 +9,12 @@ import { getSidebarSettings, type SidebarMode } from './settings/InterfaceSettin
 import { useContextMenuStore } from '../stores/contextMenuStore';
 import { usemultiNookStore } from '../stores/multiNookStore';
 import { Tooltip } from './ui/Tooltip';
+import { ProviderLogo } from './ProviderLogo';
 
 import { Logger } from '../utils/logger';
 import { useVisibleInterval } from '../utils/useVisibleInterval';
+import { getItzonExplore, getItzonFollowing, itzonStreamToTwitchStream, partitionItzonStreams } from '../services/itzon';
+import { SharedAttemptGate } from '../utils/sharedAttemptGate';
 // Width constants
 const COMPACT_WIDTH = 56;
 const DEFAULT_EXPANDED_WIDTH = 280;
@@ -22,6 +25,11 @@ const SIDEBAR_CLOSE_DELAY = 150; // milliseconds delay before closing in hidden 
 const SIDEBAR_EXPAND_MS = 200; // width-animation duration for compact / expand-on-hover
 const SIDEBAR_BLUR_SETTLE_DELAY = SIDEBAR_EXPAND_MS + 40; // fade the glass in just after the expand settles
 const SIDEBAR_WIDTH_STORAGE_KEY = 'sidebar-expanded-width';
+
+const itzonSidebarLoadGate = new SharedAttemptGate<{
+    followed: TwitchStream[];
+    recommended: TwitchStream[];
+}>();
 
 // Get persisted sidebar width from localStorage
 const getPersistedWidth = (): number => {
@@ -121,7 +129,7 @@ const StreamItem = memo(({
     onFavoriteClick,
 }: StreamItemProps) => {
     return (
-        <Tooltip content={showExpanded ? null : `${stream.user_name} - ${stream.game_name}${hasDrops ? ' (Drops enabled)' : ''}`} delay={300} side="right">
+        <Tooltip content={showExpanded ? null : `${stream.provider === 'itzon' ? 'ITZON · ' : ''}${stream.user_name} - ${stream.game_name}${hasDrops ? ' (Drops enabled)' : ''}`} delay={300} side="right">
             <div
                 className={`group
                     flex items-center px-2 py-1.5 cursor-pointer rounded transition-all duration-200
@@ -132,7 +140,11 @@ const StreamItem = memo(({
                     ${showExpanded ? 'gap-2 justify-start' : 'gap-0 justify-center'}
                 `}
                 onClick={(e) => onStreamClick(e, stream)}
-                onContextMenu={(e) => useContextMenuStore.getState().openMenu(e, stream)}
+                onContextMenu={(e) => {
+                    if ((stream.provider ?? 'twitch') === 'twitch') {
+                        useContextMenuStore.getState().openMenu(e, stream);
+                    }
+                }}
             >
             {/* Avatar with live indicator */}
             <div className="relative flex-shrink-0 transition-all duration-200">
@@ -150,6 +162,11 @@ const StreamItem = memo(({
                     stream-card `pulse-dot` keyframes (transform-scale, GPU-cheap)
                     and only animates on the hovered row via group-hover. */}
                 <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-live border-2 border-background group-hover:animate-[pulse-dot_2s_ease-in-out_infinite]" />
+                {stream.provider === 'itzon' && (
+                    <span className="absolute -left-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-background shadow-sm">
+                        <ProviderLogo provider="itzon" size={13} />
+                    </span>
+                )}
                 {/* Drops indicator on avatar - only show in compact mode */}
                 {hasDrops && !showExpanded && (
                     <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-accent flex items-center justify-center border border-background">
@@ -175,7 +192,8 @@ const StreamItem = memo(({
                         <span className="text-textPrimary text-sm font-medium truncate">
                             {stream.user_name}
                         </span>
-                        {stream.broadcaster_type === 'partner' && (
+                        {stream.provider === 'itzon' && <ProviderLogo provider="itzon" size={12} />}
+                        {(stream.provider ?? 'twitch') === 'twitch' && stream.broadcaster_type === 'partner' && (
                             <svg className="w-3 h-3 flex-shrink-0" viewBox="0 0 16 16" fill="#9146FF">
                                 <path fillRule="evenodd" d="M12.5 3.5 8 2 3.5 3.5 2 8l1.5 4.5L8 14l4.5-1.5L14 8l-1.5-4.5ZM7 11l4.5-4.5L10 5 7 8 5.5 6.5 4 8l3 3Z" clipRule="evenodd" />
                             </svg>
@@ -296,6 +314,25 @@ const Sidebar = ({ side = 'left' }: { side?: 'left' | 'right' }) => {
         const settings = getSidebarSettings();
         return settings.showRecommended;
     });
+    const [itzonFollowedStreams, setItzonFollowedStreams] = useState<TwitchStream[]>([]);
+    const [itzonRecommendedStreams, setItzonRecommendedStreams] = useState<TwitchStream[]>([]);
+
+    const loadItzonStreams = useCallback(async () => {
+        try {
+            const snapshot = await itzonSidebarLoadGate.run(async () => {
+                const [explore, following] = await Promise.all([
+                    getItzonExplore(),
+                    getItzonFollowing(),
+                ]);
+                const streams = explore.streams.map(itzonStreamToTwitchStream);
+                return partitionItzonStreams(streams, following);
+            });
+            setItzonFollowedStreams(snapshot.followed);
+            setItzonRecommendedStreams(snapshot.recommended);
+        } catch (error) {
+            Logger.warn('[Sidebar] Could not load itzon streams:', error);
+        }
+    }, []);
 
     // Hover and manual expand states
     const [isHovered, setIsHovered] = useState(false);
@@ -457,7 +494,8 @@ const Sidebar = ({ side = 'left' }: { side?: 'left' | 'right' }) => {
             loadFollowedStreams();
         }
         loadRecommendedStreams();
-    }, [isAuthenticated, loadFollowedStreams, loadRecommendedStreams]);
+        loadItzonStreams();
+    }, [isAuthenticated, loadFollowedStreams, loadItzonStreams, loadRecommendedStreams]);
 
     // Track previous "sidebar visible" state to detect rising edge (opening)
     const prevSidebarVisibleRef = useRef(false);
@@ -482,8 +520,9 @@ const Sidebar = ({ side = 'left' }: { side?: 'left' | 'right' }) => {
                 loadFollowedStreams();
             }
             loadRecommendedStreams();
+            loadItzonStreams();
         }
-    }, [isHovered, isEdgeHovered, isManuallyExpanded, isAuthenticated, loadFollowedStreams, loadRecommendedStreams, sidebarMode]);
+    }, [isHovered, isEdgeHovered, isManuallyExpanded, isAuthenticated, loadFollowedStreams, loadItzonStreams, loadRecommendedStreams, sidebarMode]);
 
     // Constant background freshness (every 3 minutes)
     // Ensures sidebar is fresh even if user hasn't opened/closed it in hours.
@@ -498,8 +537,9 @@ const Sidebar = ({ side = 'left' }: { side?: 'left' | 'right' }) => {
             if (isAuthenticated) {
                 loadFollowedStreams();
             }
+            loadItzonStreams();
         }
-    }, [isHovered, isEdgeHovered, isManuallyExpanded, isAuthenticated, loadFollowedStreams, sidebarMode]);
+    }, [isHovered, isEdgeHovered, isManuallyExpanded, isAuthenticated, loadFollowedStreams, loadItzonStreams, sidebarMode]);
     useVisibleInterval(backgroundStreamSync, 3 * 60 * 1000);
 
     // Infinite scroll for recommended streams
@@ -678,8 +718,9 @@ const Sidebar = ({ side = 'left' }: { side?: 'left' | 'right' }) => {
         // matches the right-click context-menu "Add to MultiNook" action.
         if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
-            usemultiNookStore.getState().triggerAddAnimation(e.clientX, e.clientY, stream.user_login);
-            usemultiNookStore.getState().addSlot(stream.user_login);
+            const provider = stream.provider ?? 'twitch';
+            usemultiNookStore.getState().triggerAddAnimation(e.clientX, e.clientY, stream.user_login, provider);
+            usemultiNookStore.getState().addSlot(stream.user_login, provider);
             return;
         }
         // Exit home/PIP mode when clicking on a new stream from sidebar
@@ -736,13 +777,15 @@ const Sidebar = ({ side = 'left' }: { side?: 'left' | 'right' }) => {
     // its own labeled section — mirroring how Followed is separated from
     // Recommended. The sidebar only ever lists live channels, so these are the
     // live favorites vs. the live non-favorite follows.
-    const favoriteStreams = followedStreams.filter(s => isFavoriteStreamer(s.user_id));
-    const followedNonFavoriteStreams = followedStreams.filter(s => !isFavoriteStreamer(s.user_id));
+    const allFollowedStreams = [...followedStreams, ...itzonFollowedStreams];
+    const allRecommendedStreams = [...recommendedStreams, ...itzonRecommendedStreams];
+    const favoriteStreams = allFollowedStreams.filter(s => isFavoriteStreamer(s.user_id));
+    const followedNonFavoriteStreams = allFollowedStreams.filter(s => !isFavoriteStreamer(s.user_id));
 
     // Section-presence flags drive both the headers and the dividers between them.
-    const hasFavorites = isAuthenticated && favoriteStreams.length > 0;
-    const hasFollowed = isAuthenticated && followedNonFavoriteStreams.length > 0;
-    const hasRecommended = showRecommended && recommendedStreams.length > 0;
+    const hasFavorites = favoriteStreams.length > 0;
+    const hasFollowed = followedNonFavoriteStreams.length > 0;
+    const hasRecommended = showRecommended && allRecommendedStreams.length > 0;
 
     // Shared row renderer so Favorites / Followed / Recommended stay identical.
     const renderStreamItem = (stream: TwitchStream, showFavorite: boolean) => (
@@ -751,11 +794,14 @@ const Sidebar = ({ side = 'left' }: { side?: 'left' | 'right' }) => {
             stream={stream}
             showFavorite={showFavorite}
             showExpanded={showExpanded}
-            isCurrentStream={currentStream?.user_login === stream.user_login}
+            isCurrentStream={
+                currentStream?.user_login === stream.user_login &&
+                (currentStream.provider ?? 'twitch') === (stream.provider ?? 'twitch')
+            }
             isFavorite={isFavoriteStreamer(stream.user_id)}
-            hasDrops={stream.game_name ? dropsGameNames.has(stream.game_name.toLowerCase()) : false}
-            hypeTrainStatus={activeHypeTrainChannels.get(stream.user_id)}
-            watchStreak={watchStreaks[stream.user_id] ?? 0}
+            hasDrops={(stream.provider ?? 'twitch') === 'twitch' && stream.game_name ? dropsGameNames.has(stream.game_name.toLowerCase()) : false}
+            hypeTrainStatus={(stream.provider ?? 'twitch') === 'twitch' ? activeHypeTrainChannels.get(stream.user_id) : undefined}
+            watchStreak={(stream.provider ?? 'twitch') === 'twitch' ? watchStreaks[stream.user_id] ?? 0 : 0}
             isHeartAnimating={animatingHearts.has(stream.user_id)}
             profileImage={getProfileImage(stream)}
             onStreamClick={handleStreamClick}
@@ -975,7 +1021,7 @@ const Sidebar = ({ side = 'left' }: { side?: 'left' | 'right' }) => {
                         <div>
                             <SectionHeader icon={Sparkles} label="Recommended" count={recommendedStreams.length} showExpanded={showExpanded} />
                             <div className="space-y-0.5">
-                                {recommendedStreams.map(stream => renderStreamItem(stream, false))}
+                                {allRecommendedStreams.map(stream => renderStreamItem(stream, false))}
                             </div>
 
                             {/* Loading more indicator */}
@@ -988,14 +1034,14 @@ const Sidebar = ({ side = 'left' }: { side?: 'left' | 'right' }) => {
                     )}
 
                     {/* Empty state */}
-                    {!isAuthenticated && !hasRecommended && (
+                    {!isAuthenticated && !hasFavorites && !hasFollowed && !hasRecommended && (
                         <div className={`
                             flex items-center justify-center text-center p-4
                             ${showExpanded ? '' : 'flex-col'}
                         `}>
                             {showExpanded ? (
                                 <p className="text-xs text-textMuted">
-                                    Log in to see followed streams
+                                    Connect Twitch or itzon to see followed streams
                                 </p>
                             ) : (
                                 <Users size={16} className="text-textMuted" />

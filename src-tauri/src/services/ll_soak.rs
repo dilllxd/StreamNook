@@ -92,8 +92,7 @@ fn parse_fragment_tracks(data: &[u8]) -> Vec<(u32, u64, u64)> {
                                 if body.len() >= 8 {
                                     let flags = u32::from_be_bytes(body[0..4].try_into().unwrap())
                                         & 0x00FF_FFFF;
-                                    let count =
-                                        u32::from_be_bytes(body[4..8].try_into().unwrap());
+                                    let count = u32::from_be_bytes(body[4..8].try_into().unwrap());
                                     let mut off = 8usize;
                                     if flags & 0x1 != 0 {
                                         off += 4; // data_offset
@@ -142,7 +141,9 @@ fn chunked_url(master: &str) -> Option<String> {
         if !l.starts_with("#EXT-X-STREAM-INF") {
             continue;
         }
-        let Some(url) = lines.get(i + 1).filter(|u| u.starts_with("http")) else { continue };
+        let Some(url) = lines.get(i + 1).filter(|u| u.starts_with("http")) else {
+            continue;
+        };
         if l.contains("VIDEO=\"chunked\"") {
             return Some(url.to_string());
         }
@@ -232,7 +233,9 @@ async fn soak_origin() {
                     if let Some(prev) = last_media_seq {
                         if seq > prev + 3 {
                             report.media_seq_jumps += 1;
-                            println!("[soak][watchdog] MEDIA-SEQUENCE jump {prev} -> {seq} (rebuild)");
+                            println!(
+                                "[soak][watchdog] MEDIA-SEQUENCE jump {prev} -> {seq} (rebuild)"
+                            );
                         }
                     }
                     last_media_seq = Some(seq);
@@ -341,7 +344,10 @@ async fn soak_origin() {
     println!("segments: {}  parts: {}", report.segments, report.parts);
     let max_hold = report.holds_ms.iter().max().copied().unwrap_or(0);
     let over = report.holds_ms.iter().filter(|&&h| h > 1100).count();
-    println!("playlist holds: {} (max {max_hold}ms, {over} over 1.1s)", report.holds_ms.len());
+    println!(
+        "playlist holds: {} (max {max_hold}ms, {over} over 1.1s)",
+        report.holds_ms.len()
+    );
     println!(
         "famines >1.2s: {} {:?}",
         report.famines.len(),
@@ -354,7 +360,11 @@ async fn soak_origin() {
     println!(
         "stalls: {} {:?}",
         report.stalls.len(),
-        report.stalls.iter().map(|f| (f * 100.0).round() / 100.0).collect::<Vec<_>>()
+        report
+            .stalls
+            .iter()
+            .map(|f| (f * 100.0).round() / 100.0)
+            .collect::<Vec<_>>()
     );
     println!(
         "timeline seam errors: {}  (sub-tolerance corrections seen: {})",

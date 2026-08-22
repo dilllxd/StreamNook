@@ -191,9 +191,13 @@ fn native_present(slug: &str) -> bool {
 /// so swap a numeric (or empty) label for the channel's display name.
 fn kick_set_label(raw: &str, slug: &str, display: Option<&str>) -> String {
     if raw.is_empty() || raw.chars().all(|c| c.is_ascii_digit()) {
-        return display
-            .map(String::from)
-            .unwrap_or_else(|| if raw.is_empty() { slug.to_string() } else { raw.to_string() });
+        return display.map(String::from).unwrap_or_else(|| {
+            if raw.is_empty() {
+                slug.to_string()
+            } else {
+                raw.to_string()
+            }
+        });
     }
     raw.to_string()
 }
@@ -216,7 +220,13 @@ pub async fn refresh(slug: &str, user_id: u64) {
     let client = reqwest::Client::new();
     let mut map: HashMap<String, KickEmote> = HashMap::new();
     // Globals first so the channel set overrides on name collisions.
-    fetch_into(&client, "https://7tv.io/v3/emote-sets/global", "/emotes", &mut map).await;
+    fetch_into(
+        &client,
+        "https://7tv.io/v3/emote-sets/global",
+        "/emotes",
+        &mut map,
+    )
+    .await;
     let chan_url = format!("https://7tv.io/v3/users/kick/{user_id}");
     if let Some(user) = fetch_json(&client, &chan_url).await {
         if user

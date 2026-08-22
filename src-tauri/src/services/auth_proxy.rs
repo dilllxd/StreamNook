@@ -356,7 +356,11 @@ fn stream_inf_height(inf: &str) -> Option<u32> {
     if let Some(pos) = inf.find("RESOLUTION=") {
         let rest = &inf[pos + "RESOLUTION=".len()..];
         let val = rest.split(',').next().unwrap_or(rest);
-        if let Some(h) = val.split(['x', 'X']).nth(1).and_then(|h| h.trim().parse::<u32>().ok()) {
+        if let Some(h) = val
+            .split(['x', 'X'])
+            .nth(1)
+            .and_then(|h| h.trim().parse::<u32>().ok())
+        {
             return Some(h);
         }
     }

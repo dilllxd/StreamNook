@@ -53,7 +53,10 @@ fn effective_codec_pref() -> Vec<String> {
 /// An empty/missing codec is treated as H.264 (the safe, universally-decodable
 /// default).
 fn codec_family(codecs: Option<&str>) -> &'static str {
-    let first = codecs.and_then(|c| c.split(',').next()).unwrap_or("").trim();
+    let first = codecs
+        .and_then(|c| c.split(',').next())
+        .unwrap_or("")
+        .trim();
     if first.starts_with("av01") {
         "av1"
     } else if first.starts_with("hev1") || first.starts_with("hvc1") {
@@ -362,7 +365,8 @@ pub fn select_variant(variants: &[Variant], requested: &str) -> Option<(usize, S
     // At the matched resolution, prefer the most-efficient decodable codec (same
     // capability gate as "best"); keep the matched rendition when none is preferable.
     let pref = effective_codec_pref();
-    let idx = prefer_codec_at(variants, variants[idx].height, variants[idx].fps, &pref).unwrap_or(idx);
+    let idx =
+        prefer_codec_at(variants, variants[idx].height, variants[idx].fps, &pref).unwrap_or(idx);
     Some((idx, variants[idx].name.clone()))
 }
 
@@ -1188,7 +1192,7 @@ https://x/av1-720.m3u8\n",
     fn set_codec_preference_filters_junk_and_always_keeps_h264() {
         set_codec_preference(vec!["av1".into(), "vp9".into(), "hevc".into()]);
         assert_eq!(effective_codec_pref(), vec!["av1", "hevc", "h264"]); // vp9 dropped
-        // Reset to the default-equivalent so any concurrent test sees H.264-only.
+                                                                         // Reset to the default-equivalent so any concurrent test sees H.264-only.
         set_codec_preference(vec![]);
         assert_eq!(effective_codec_pref(), vec!["h264"]);
     }

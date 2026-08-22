@@ -118,7 +118,11 @@ impl MultiNookServer {
         // settled answer when `start_multi_nook` tags the proxy URL. On a
         // normal-latency channel the origin stays inactive and the plain playlist
         // proxy serves the tile.
-        origin.start(stream_url).await;
+        if crate::services::itzon_media::is_itzon_hls_url(&stream_url) {
+            origin.stop();
+        } else {
+            origin.start(stream_url).await;
+        }
 
         Ok(port)
     }
@@ -247,11 +251,18 @@ impl MultiNookServer {
 
         let request_path = path.as_str().trim_start_matches('/');
 
+        // Read the upstream before provider-specific routing. A stopped tile can
+        // still deliver one keep-alive poll, which receives a CORS-safe 404.
+        let Some(url) = proxy_url.lock().await.clone() else {
+            return Ok(empty_cors(404));
+        };
+        let is_itzon = crate::services::itzon_media::is_itzon_hls_url(&url);
+
         // ── LL-HLS origin path: identical routing to the solo relay ──
         // When the tile's origin is live it owns the media playlist, parts, and
         // complete segments (served from memory); the upstream proxy below only
         // handles the non-LL case.
-        if origin.is_active() {
+        if !is_itzon && origin.is_active() {
             // Origin-generated init segment (TS transmux path).
             if request_path == "init.mp4" {
                 if let Some(bytes) = origin.get_init() {
@@ -290,39 +301,52 @@ impl MultiNookServer {
         // distinct `vseg/` prefix, so it never collides with the LL origin's
         // `seg/`; the per-tile session id keeps two tiles' equal sequence numbers
         // from resolving to each other.
-        if let Some((sid, sn)) = crate::services::hls_projection::parse_vseg_path(request_path) {
-            return Ok(
-                match crate::services::hls_projection::redirect_target(&sid, sn) {
-                    Some(u) => warp::http::Response::builder()
-                        .status(302)
-                        .header("Location", u)
-                        .header("Access-Control-Allow-Origin", "*")
-                        .header(
-                            "Cache-Control",
-                            "no-cache, no-store, must-revalidate, max-age=0",
-                        )
-                        .body(vec![])
-                        .unwrap(),
-                    None => empty_cors(404),
-                },
-            );
+        if !is_itzon {
+            if let Some((sid, sn)) = crate::services::hls_projection::parse_vseg_path(request_path)
+            {
+                return Ok(
+                    match crate::services::hls_projection::redirect_target(&sid, sn) {
+                        Some(u) => warp::http::Response::builder()
+                            .status(302)
+                            .header("Location", u)
+                            .header("Access-Control-Allow-Origin", "*")
+                            .header(
+                                "Cache-Control",
+                                "no-cache, no-store, must-revalidate, max-age=0",
+                            )
+                            .body(vec![])
+                            .unwrap(),
+                        None => empty_cors(404),
+                    },
+                );
+            }
         }
 
-        // Tiles only relay the media playlist on the non-LL path; stabilized
-        // segment URLs in it 302 back here via the `vseg/` route above.
-        if request_path != "stream.m3u8" && !request_path.is_empty() {
-            return Ok(empty_cors(404));
-        }
-
-        // A keep-alive connection can deliver one last poll after the tile relay
-        // stops (the abort only kills the accept loop). A warp rejection would be
-        // a bare 404 without CORS headers, which the webview logs as a CORS error;
-        // answer with a CORS'd 404 instead.
-        let Some(url) = proxy_url.lock().await.clone() else {
-            return Ok(empty_cors(404));
+        // The player-facing entry point is always stream.m3u8. Standard LL-HLS
+        // playlists (including itzon) reference init segments, parts and complete
+        // segments with relative paths, so proxy those paths against the fixed
+        // upstream playlist URL. Twitch's stabilized vseg routes are handled above.
+        let upstream_url = if request_path == "stream.m3u8" || request_path.is_empty() {
+            url.clone()
+        } else {
+            let mut joined =
+                match reqwest::Url::parse(&url).and_then(|base| base.join(request_path)) {
+                    Ok(joined) => joined,
+                    Err(e) => {
+                        debug!(
+                            "[MultiNook] Invalid relative HLS request '{}': {}",
+                            request_path, e
+                        );
+                        return Ok(empty_cors(400));
+                    }
+                };
+            if !raw_query.is_empty() {
+                joined.set_query(Some(&raw_query));
+            }
+            joined.to_string()
         };
 
-        let response = match HTTP_CLIENT.get(&url).send().await {
+        let response = match HTTP_CLIENT.get(&upstream_url).send().await {
             Ok(res) => res,
             Err(e) => {
                 debug!("[MultiNook] Upstream request failed: {}", e);
@@ -335,6 +359,12 @@ impl MultiNookServer {
         };
 
         let status = response.status();
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("application/octet-stream")
+            .to_string();
         let mut bytes = match response.bytes().await {
             Ok(b) => b.to_vec(),
             Err(e) => {
@@ -347,6 +377,22 @@ impl MultiNookServer {
             }
         };
 
+        let is_playlist = request_path == "stream.m3u8"
+            || request_path.ends_with(".m3u8")
+            || content_type.to_ascii_lowercase().contains("mpegurl")
+            || bytes.starts_with(b"#EXTM3U");
+
+        if !is_playlist {
+            return Ok(warp::http::Response::builder()
+                .status(status)
+                .header("Content-Type", content_type)
+                .header("Access-Control-Allow-Origin", "*")
+                .header("Access-Control-Allow-Methods", "GET, OPTIONS")
+                .header("Cache-Control", "no-cache")
+                .body(bytes)
+                .unwrap());
+        }
+
         // Detect ad markers for the per-tile state — same shared logic as the solo
         // player, read-only: the tile relay is ad-neutral and serves the upstream's
         // segments untouched. For playback only; the core never reports ads to a plugin.
@@ -357,30 +403,33 @@ impl MultiNookServer {
         // the inflated 6 makes it re-poll too slowly to keep a small per-tile buffer fed
         // and the tile stalls shortly after starting. Tile low latency, when enabled, is
         // served by the per-tile parts origin above and never reaches here.
-        if let Ok(text) = std::str::from_utf8(&bytes) {
-            {
-                let mut st = ad_state.lock().unwrap();
-                if let Some(n) = ad_detect::update(&mut st, text) {
-                    info!(
-                        "[MultiNook] ad markers detected on '{}' (break #{}): {:?}",
-                        stream_id, n, st.matched_markers
-                    );
+        if !is_itzon {
+            if let Ok(text) = std::str::from_utf8(&bytes) {
+                {
+                    let mut st = ad_state.lock().unwrap();
+                    if let Some(n) = ad_detect::update(&mut st, text) {
+                        info!(
+                            "[MultiNook] ad markers detected on '{}' (break #{}): {:?}",
+                            stream_id, n, st.matched_markers
+                        );
+                    }
                 }
+                // Retarget, then pin segment URLs stable across refreshes. Gated like the
+                // solo path: only on a live playlist (not VOD/#EXT-X-ENDLIST) and only when
+                // the experimental low-latency engine is off, so our `vseg/` rewrite never
+                // races the per-tile origin's `seg/` scheme for the same media sequence.
+                let is_live = !text.contains("#EXT-X-ENDLIST");
+                let stabilize_ok = is_live && crate::services::ll_origin::engine_disabled();
+                let work: String =
+                    ad_detect::retarget_playlist(text).unwrap_or_else(|| text.to_string());
+                bytes = if stabilize_ok {
+                    let base = crate::services::hls_projection::base_url_of(&upstream_url);
+                    crate::services::hls_projection::stabilize(&stream_id, &work, &base)
+                        .into_bytes()
+                } else {
+                    work.into_bytes()
+                };
             }
-            // Retarget, then pin segment URLs stable across refreshes. Gated like the
-            // solo path: only on a live playlist (not VOD/#EXT-X-ENDLIST) and only when
-            // the experimental low-latency engine is off, so our `vseg/` rewrite never
-            // races the per-tile origin's `seg/` scheme for the same media sequence.
-            let is_live = !text.contains("#EXT-X-ENDLIST");
-            let stabilize_ok = is_live && crate::services::ll_origin::engine_disabled();
-            let work: String =
-                ad_detect::retarget_playlist(text).unwrap_or_else(|| text.to_string());
-            bytes = if stabilize_ok {
-                let base = crate::services::hls_projection::base_url_of(&url);
-                crate::services::hls_projection::stabilize(&stream_id, &work, &base).into_bytes()
-            } else {
-                work.into_bytes()
-            };
         }
 
         Ok(warp::http::Response::builder()

@@ -4,9 +4,9 @@
 // release phase via the `enabled` flag below. A "source" the user watches is
 // identified by a composite `<provider>:<channel>` key (see utils/providerKey).
 
-export type ProviderId = 'twitch' | 'kick' | 'youtube' | 'rumble' | 'tiktok' | 'x';
+export type ProviderId = 'twitch' | 'itzon' | 'kick' | 'youtube' | 'rumble' | 'tiktok' | 'x';
 
-export const PROVIDER_IDS: ProviderId[] = ['twitch', 'kick', 'youtube', 'rumble', 'tiktok', 'x'];
+export const PROVIDER_IDS: ProviderId[] = ['twitch', 'itzon', 'kick', 'youtube', 'rumble', 'tiktok', 'x'];
 
 export const DEFAULT_PROVIDER: ProviderId = 'twitch';
 
@@ -33,6 +33,7 @@ export interface ProviderMeta {
 
 export const PROVIDERS: Record<ProviderId, ProviderMeta> = {
   twitch: { id: 'twitch', label: 'Twitch', enabled: true, send: 'native', readNeedsWebview: false, color: '#9147ff' },
+  itzon: { id: 'itzon', label: 'ITZON', enabled: true, send: 'webview', readNeedsWebview: false, color: '#4ade80' },
   kick: { id: 'kick', label: 'Kick', enabled: false, send: 'oauth', readNeedsWebview: false, color: '#53fc18' },
   youtube: { id: 'youtube', label: 'YouTube', enabled: true, send: 'webview', readNeedsWebview: false, color: '#ff0000' },
   rumble: { id: 'rumble', label: 'Rumble', enabled: false, send: 'webview', readNeedsWebview: false, color: '#85c742' },

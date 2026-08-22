@@ -9,6 +9,8 @@
 
 - Hardened itzon playback and chat recovery for long-running streams.
 - Prevented Discord RPC from blocking application startup.
+- Switched Twitch sign-in, token refresh, linked accounts, and moderator-room
+  consent to the public Device Code Flow so desktop builds need no client secret.
 
 ## [8.4.2] - 2026-08-16
 

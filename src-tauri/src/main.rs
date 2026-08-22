@@ -224,7 +224,6 @@ mod commands;
 mod models;
 mod plugin_host;
 mod services;
-mod utils;
 
 /// Load settings from the custom location in the same directory as cache
 fn load_settings_from_file() -> Result<Settings, Box<dyn std::error::Error>> {

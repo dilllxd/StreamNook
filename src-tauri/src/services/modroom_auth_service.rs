@@ -20,17 +20,12 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use tokio::sync::Mutex;
 
-use crate::services::twitch_service::get_app_data_dir;
+use crate::services::twitch_service::{get_app_data_dir, DeviceCodeInfo, TwitchService};
 
 const CLIENT_ID: &str = env!("TWITCH_APP_CLIENT_ID");
-const CLIENT_SECRET: &str = env!("TWITCH_APP_CLIENT_SECRET");
 
 /// The only scope this credential ever requests.
 const SCOPE: &str = "user:read:moderated_channels";
-
-/// Fixed loopback redirect registered on the Twitch app for this flow. Distinct
-/// from the add-account flow's `:3000/callback` so the two never collide.
-const REDIRECT_URI: &str = "http://localhost:8765/modroom/callback";
 
 const CRED_FILE_NAME: &str = ".modroom_token";
 
@@ -123,20 +118,8 @@ pub fn disconnect() -> Result<()> {
     Ok(())
 }
 
-/// Authorize URL for the scoped consent. No `force_verify`, so it reuses the
-/// user's existing browser Twitch session and only asks to grant the one scope.
-pub fn build_authorize_url(state: &str) -> Result<String> {
-    let url = reqwest::Url::parse_with_params(
-        "https://id.twitch.tv/oauth2/authorize",
-        &[
-            ("client_id", CLIENT_ID),
-            ("redirect_uri", REDIRECT_URI),
-            ("response_type", "code"),
-            ("scope", SCOPE),
-            ("state", state),
-        ],
-    )?;
-    Ok(url.to_string())
+pub async fn start_device_authorization() -> Result<DeviceCodeInfo> {
+    TwitchService::start_device_authorization(SCOPE).await
 }
 
 /// 4xx from id.twitch.tv means the grant itself is dead (revoked consent,
@@ -167,22 +150,9 @@ async fn post_token(params: &[(&str, &str)]) -> Result<FreshToken, TokenFail> {
     })
 }
 
-async fn exchange_code(code: &str) -> Result<FreshToken> {
-    post_token(&[
-        ("client_id", CLIENT_ID),
-        ("client_secret", CLIENT_SECRET),
-        ("code", code),
-        ("grant_type", "authorization_code"),
-        ("redirect_uri", REDIRECT_URI),
-    ])
-    .await
-    .map_err(|e| anyhow!("mod-room code exchange failed: {:?}", e))
-}
-
 async fn refresh(refresh_token: &str) -> Result<FreshToken, TokenFail> {
     let mut fresh = post_token(&[
         ("client_id", CLIENT_ID),
-        ("client_secret", CLIENT_SECRET),
         ("grant_type", "refresh_token"),
         ("refresh_token", refresh_token),
     ])
@@ -216,10 +186,15 @@ async fn validate(access_token: &str) -> Result<(String, String)> {
     Ok((v.user_id, v.login))
 }
 
-/// Finish the consent: trade the redirect code for the scoped token, attach
-/// identity, and persist.
-pub async fn connect_with_code(code: &str) -> Result<ModRoomCredential> {
-    let token = exchange_code(code).await?;
+/// Complete the scoped device authorization, attach identity, and persist it.
+pub async fn complete_device_authorization(
+    device_code: &str,
+    interval: u64,
+    expires_in: u64,
+) -> Result<ModRoomCredential> {
+    let token =
+        TwitchService::complete_device_authorization(device_code, interval, expires_in, SCOPE)
+            .await?;
     let (user_id, login) = validate(&token.access_token).await?;
     let cred = ModRoomCredential {
         user_id,

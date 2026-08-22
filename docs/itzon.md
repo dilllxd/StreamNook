@@ -29,12 +29,14 @@ npx tsx --test "src/**/*.test.ts"
 npm run tauri build -- --no-bundle
 ```
 
-The Rust build also expects the Twitch compile-time values used by upstream
-StreamNook. The fork workflow reads `TWITCH_CLIENT_ID` and
-`TWITCH_CLIENT_SECRET` from GitHub Actions secrets. It produces an unsigned
-portable Windows executable, ZIP and 7z archives, manifests, and SHA-256
-checksums. Pushing an `itzon-v*` tag creates a GitHub prerelease after verifying
-that the tag matches the application version and the Twitch secrets exist.
+The Rust build also expects a Twitch client ID. Twitch authentication uses the
+public-client Device Code Flow, including token refresh, linked accounts, and
+moderator-room consent, so no client secret is embedded in the application. The
+fork workflow reads `TWITCH_CLIENT_ID` from a GitHub Actions repository
+variable. It produces an unsigned portable Windows executable, ZIP and 7z
+archives, manifests, and SHA-256 checksums. Pushing an `itzon-v*` tag creates a
+GitHub prerelease after verifying that the tag matches the application version
+and the Twitch client ID exists.
 
 ## Current gaps
 

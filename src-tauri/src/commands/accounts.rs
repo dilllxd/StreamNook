@@ -4,9 +4,7 @@
 
 use crate::models::settings::AppState;
 use crate::services::account_store::{AccountStore, StoredAccount};
-use crate::services::twitch_service::TwitchService;
-use crate::utils::oauth_server;
-use std::time::Duration;
+use crate::services::twitch_service::{TwitchService, SCOPES};
 use tauri::{AppHandle, State};
 
 /// Every linked account, primary first. The frontend uses this to render the
@@ -23,53 +21,28 @@ pub async fn get_twitch_account_count() -> Result<usize, String> {
     Ok(AccountStore::count())
 }
 
-/// Link a NEW secondary account via the system browser.
-///
-/// Forces Twitch's account chooser (`force_verify=true`) in the user's default
-/// browser, captures the redirect on the localhost callback, exchanges the code
-/// for that account's own token, and files it as a SECONDARY. This never reads
-/// or writes the primary's cached token, and `add_secondary` rejects the attempt
-/// if the chosen account is already the primary. Resolves with the linked
-/// account, or an error string the UI can surface (cancelled, timed out, etc.).
+/// Link a new secondary account with Twitch's public-client Device Code Flow.
+/// The token is filed directly as a secondary and never occupies the primary
+/// account's storage slot.
 #[tauri::command]
 pub async fn add_twitch_account(app: AppHandle) -> Result<StoredAccount, String> {
     use tauri_plugin_opener::OpenerExt;
 
-    // Opaque CSRF token, verified against the redirect's `state`.
-    let state = format!("{:032x}", rand::random::<u128>());
-
-    // Bind the callback listener BEFORE opening the browser so a fast redirect
-    // can't arrive before we're ready.
-    let listener = oauth_server::start_oauth_listener()
+    let flow = TwitchService::start_device_authorization(SCOPES)
         .await
         .map_err(|e| e.to_string())?;
-
-    let url = TwitchService::build_authorize_url(&state).map_err(|e| e.to_string())?;
     app.opener()
-        .open_url(url, None::<String>)
+        .open_url(flow.verification_uri, None::<String>)
         .map_err(|e| format!("Failed to open browser: {}", e))?;
 
-    // Wait up to five minutes for the user to finish signing in.
-    let callback = listener
-        .wait(Duration::from_secs(300))
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if let Some(err) = callback.error {
-        return Err(format!("Sign-in was cancelled or failed: {}", err));
-    }
-    if callback.state.as_deref() != Some(state.as_str()) {
-        return Err(
-            "Sign-in could not be verified (state mismatch). Please try again.".to_string(),
-        );
-    }
-    if callback.code.is_empty() {
-        return Err("Twitch did not return an authorization code.".to_string());
-    }
-
-    let token = TwitchService::exchange_code_for_token(&callback.code)
-        .await
-        .map_err(|e| e.to_string())?;
+    let token = TwitchService::complete_device_authorization(
+        &flow.device_code,
+        flow.interval,
+        flow.expires_in,
+        SCOPES,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
 
     AccountStore::add_secondary(token)
         .await

@@ -10,7 +10,6 @@ fn main() {
     // Keys we want to extract from .env or environment variables
     let allowed_keys = vec![
         "TWITCH_APP_CLIENT_ID",
-        "TWITCH_APP_CLIENT_SECRET",
         "TWITCH_ANDROID_CLIENT_ID",
         "TWITCH_WEB_CLIENT_ID",
         // Kick OAuth app (Authorization Code + PKCE). Read at compile time the

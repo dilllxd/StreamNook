@@ -17,11 +17,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::Emitter;
 
 const CLIENT_ID: &str = env!("TWITCH_APP_CLIENT_ID");
-const CLIENT_SECRET: &str = env!("TWITCH_APP_CLIENT_SECRET");
 const TWITCH_GQL_CLIENT_ID: &str = "kimne78kx3ncx6brgo4mv6wki5h1ko";
 const KEYRING_SERVICE: &str = "streamnook_twitch_token";
 const KEYRING_USERNAME: &str = "user"; // Standardized username
-const REDIRECT_URI: &str = "http://localhost:3000/callback";
 // Adding ANY scope here invalidates every stored token at once (see the
 // missing-scopes branch in check_token_health, which calls AccountStore::
 // reset_all). That makes a scope change a one-time, whole-user-base re-auth, so
@@ -32,7 +30,7 @@ const REDIRECT_URI: &str = "http://localhost:3000/callback";
 //   moderator:manage:blocked_terms — /blockterm and /unblockterm (read-only
 //     moderator:read:blocked_terms was already held)
 //   user:bot — the chat-bot badge on /bot sends
-const SCOPES: &str = "user:read:follows user:read:email chat:read chat:edit channel:read:redemptions channel:manage:redemptions moderator:read:followers openid user:manage:whispers user:read:whispers user:read:emotes channel:read:hype_train moderator:read:blocked_terms moderator:manage:blocked_terms moderator:manage:chat_settings moderator:manage:unban_requests moderator:manage:banned_users moderator:manage:chat_messages moderator:read:warnings moderator:read:moderators moderator:read:vips moderator:read:chatters channel:manage:moderators channel:manage:vips channel:manage:polls channel:manage:predictions moderator:manage:suspicious_users user:manage:chat_color user:manage:blocked_users user:read:blocked_users moderator:manage:announcements moderator:manage:shoutouts channel:edit:commercial channel:manage:raids channel:manage:broadcast moderation:read user:write:chat user:bot clips:edit";
+pub(crate) const SCOPES: &str = "user:read:follows user:read:email chat:read chat:edit channel:read:redemptions channel:manage:redemptions moderator:read:followers openid user:manage:whispers user:read:whispers user:read:emotes channel:read:hype_train moderator:read:blocked_terms moderator:manage:blocked_terms moderator:manage:chat_settings moderator:manage:unban_requests moderator:manage:banned_users moderator:manage:chat_messages moderator:read:warnings moderator:read:moderators moderator:read:vips moderator:read:chatters channel:manage:moderators channel:manage:vips channel:manage:polls channel:manage:predictions moderator:manage:suspicious_users user:manage:chat_color user:manage:blocked_users user:read:blocked_users moderator:manage:announcements moderator:manage:shoutouts channel:edit:commercial channel:manage:raids channel:manage:broadcast moderation:read user:write:chat user:bot clips:edit";
 const TOKEN_FILE_NAME: &str = ".twitch_token";
 
 /// Get the app data directory (works consistently in dev and release)
@@ -419,7 +417,7 @@ impl TwitchService {
         let client = crate::services::http::client().clone();
 
         // Start device flow
-        let device_response = Self::start_device_flow(&client).await?;
+        let device_response = Self::start_device_flow(&client, SCOPES).await?;
         let user_code = device_response.user_code.clone();
 
         debug!(
@@ -436,7 +434,8 @@ impl TwitchService {
         // Spawn a task to poll for token
         tokio::task::spawn(async move {
             debug!("[LOGIN] Starting token polling task...");
-            let result = Self::poll_for_token(&client, &device_code, interval, expires_in).await;
+            let result =
+                Self::poll_for_token(&client, &device_code, interval, expires_in, SCOPES).await;
 
             match result {
                 Ok(token_response) => {
@@ -550,10 +549,12 @@ impl TwitchService {
         Ok((verification_uri, user_code))
     }
 
-    // Device code flow methods (kept for backward compatibility if needed)
-    pub async fn start_device_login(_state: &AppState) -> Result<DeviceCodeInfo> {
+    /// Start a Twitch public-client authorization for the requested scopes.
+    /// The verification URI returned by Twitch includes the user code and can
+    /// be opened directly in the system browser.
+    pub(crate) async fn start_device_authorization(scopes: &str) -> Result<DeviceCodeInfo> {
         let client = crate::services::http::client().clone();
-        let device_response = Self::start_device_flow(&client).await?;
+        let device_response = Self::start_device_flow(&client, scopes).await?;
 
         Ok(DeviceCodeInfo {
             user_code: device_response.user_code,
@@ -564,19 +565,36 @@ impl TwitchService {
         })
     }
 
-    pub async fn complete_device_login(device_code: &str, _state: &AppState) -> Result<String> {
+    /// Complete a public-client device authorization without persisting it.
+    /// Callers decide whether the token belongs to the primary account, a
+    /// linked account, or a separately scoped feature.
+    pub(crate) async fn complete_device_authorization(
+        device_code: &str,
+        interval: u64,
+        expires_in: u64,
+        scopes: &str,
+    ) -> Result<StorableToken> {
         let client = crate::services::http::client().clone();
-
-        let token_response = Self::poll_for_token(&client, device_code, 5, 1800).await?;
-
+        let token_response =
+            Self::poll_for_token(&client, device_code, interval, expires_in, scopes).await?;
         let expires_at =
             Utc::now() + ChronoDuration::seconds(token_response.expires_in.unwrap_or(3600) as i64);
 
-        let storable_token = StorableToken {
-            access_token: token_response.access_token.clone(),
-            refresh_token: token_response.refresh_token.clone().unwrap_or_default(),
+        Ok(StorableToken {
+            access_token: token_response.access_token,
+            refresh_token: token_response.refresh_token.unwrap_or_default(),
             expires_at: expires_at.timestamp(),
-        };
+        })
+    }
+
+    // Device code commands used by the primary-account setup flow.
+    pub async fn start_device_login(_state: &AppState) -> Result<DeviceCodeInfo> {
+        Self::start_device_authorization(SCOPES).await
+    }
+
+    pub async fn complete_device_login(device_code: &str, _state: &AppState) -> Result<String> {
+        let storable_token =
+            Self::complete_device_authorization(device_code, 5, 1800, SCOPES).await?;
 
         // Store token to file (primary storage)
         Self::store_token_to_file(&storable_token)?;
@@ -594,71 +612,14 @@ impl TwitchService {
         );
         debug!(
             "Access token: {}...",
-            &token_response.access_token[..10.min(token_response.access_token.len())]
+            &storable_token.access_token[..10.min(storable_token.access_token.len())]
         );
 
         Ok("Login successful".to_string())
     }
 
-    /// Build the Twitch OAuth authorize URL for linking a NEW account in the
-    /// system browser. `force_verify=true` makes Twitch always show the account
-    /// chooser / login, so the user signs in deliberately as a different account
-    /// rather than silently reusing an existing browser session. `state` is an
-    /// opaque CSRF token the caller verifies against the redirect. This reads
-    /// nothing from the primary's cached token.
-    pub(crate) fn build_authorize_url(state: &str) -> Result<String> {
-        let url = reqwest::Url::parse_with_params(
-            "https://id.twitch.tv/oauth2/authorize",
-            &[
-                ("client_id", CLIENT_ID),
-                ("redirect_uri", REDIRECT_URI),
-                ("response_type", "code"),
-                ("scope", SCOPES),
-                ("force_verify", "true"),
-                ("state", state),
-            ],
-        )?;
-        Ok(url.to_string())
-    }
-
-    /// Exchange an authorization code (from the redirect) for a fresh token.
-    /// Deliberately does NOT persist anything: the caller decides where the token
-    /// goes. For a linked secondary account that is the AccountStore's secondary
-    /// slot, never the primary's cache.
-    pub(crate) async fn exchange_code_for_token(code: &str) -> Result<StorableToken> {
-        let client = crate::services::http::client().clone();
-        let params = [
-            ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
-            ("code", code),
-            ("grant_type", "authorization_code"),
-            ("redirect_uri", REDIRECT_URI),
-        ];
-
-        let response = client
-            .post("https://id.twitch.tv/oauth2/token")
-            .form(&params)
-            .send()
-            .await?;
-
-        if !response.status().is_success() {
-            let error_text = response.text().await?;
-            return Err(anyhow::anyhow!("Token exchange failed: {}", error_text));
-        }
-
-        let token_response: TokenResponse = response.json().await?;
-        let expires_at =
-            Utc::now() + ChronoDuration::seconds(token_response.expires_in.unwrap_or(3600) as i64);
-
-        Ok(StorableToken {
-            access_token: token_response.access_token,
-            refresh_token: token_response.refresh_token.unwrap_or_default(),
-            expires_at: expires_at.timestamp(),
-        })
-    }
-
-    async fn start_device_flow(client: &Client) -> Result<DeviceCodeResponse> {
-        let params = [("client_id", CLIENT_ID), ("scopes", SCOPES)];
+    async fn start_device_flow(client: &Client, scopes: &str) -> Result<DeviceCodeResponse> {
+        let params = [("client_id", CLIENT_ID), ("scopes", scopes)];
 
         let response = client
             .post("https://id.twitch.tv/oauth2/device")
@@ -683,6 +644,7 @@ impl TwitchService {
         device_code: &str,
         interval: u64,
         expires_in: u64,
+        scopes: &str,
     ) -> Result<TokenResponse> {
         let start_time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
         let expiry_time = start_time + expires_in;
@@ -700,7 +662,7 @@ impl TwitchService {
 
             let params = [
                 ("client_id", CLIENT_ID),
-                ("scopes", SCOPES),
+                ("scopes", scopes),
                 ("device_code", device_code),
                 ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
             ];
@@ -765,7 +727,6 @@ impl TwitchService {
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh_token),
             ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
         ];
 
         debug!("[REFRESH] Attempting to refresh token...");

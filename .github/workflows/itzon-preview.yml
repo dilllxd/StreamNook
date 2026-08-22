@@ -19,8 +19,7 @@ jobs:
     outputs:
       stem: ${{ steps.package.outputs.STEM }}
     env:
-      TWITCH_APP_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
-      TWITCH_APP_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+      TWITCH_APP_CLIENT_ID: ${{ vars.TWITCH_CLIENT_ID }}
       TWITCH_ANDROID_CLIENT_ID: kd1unb4b3q4t58fwlpcbzcbnm76a8fp
       TWITCH_WEB_CLIENT_ID: kimne78kx3ncx6brgo4mv6wki5h1ko
       ITZON_OAUTH_CLIENT_ID: 956c2bcc5de7c1a24af49b64da1ebfc8
@@ -49,10 +48,9 @@ jobs:
           $version = $Matches[1]
           "VERSION=$version" | Out-File $env:GITHUB_ENV -Append
 
-          $hasTwitchOAuth = -not [string]::IsNullOrWhiteSpace($env:TWITCH_APP_CLIENT_ID) -and
-            -not [string]::IsNullOrWhiteSpace($env:TWITCH_APP_CLIENT_SECRET)
+          $hasTwitchOAuth = -not [string]::IsNullOrWhiteSpace($env:TWITCH_APP_CLIENT_ID)
           if (-not $hasTwitchOAuth) {
-            Write-Output "::warning::Twitch OAuth secrets are missing; this branch artifact cannot sign in to Twitch"
+            Write-Output "::warning::TWITCH_CLIENT_ID is missing; this branch artifact cannot sign in to Twitch"
           }
 
           if ($env:GITHUB_REF_TYPE -eq "tag") {
@@ -60,7 +58,7 @@ jobs:
               throw "Tag $env:GITHUB_REF_NAME does not match itzon-v$version"
             }
             if (-not $hasTwitchOAuth) {
-              throw "TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET are required for a release"
+              throw "The TWITCH_CLIENT_ID repository variable is required for a release"
             }
           }
 

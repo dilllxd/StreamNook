@@ -207,31 +207,14 @@ impl DiscordService {
         Self::set_idle_presence_internal(&mut guard).await
     }
 
-    /// Open an IPC connection and capture the logged-in user's display name.
-    ///
-    /// The crate's default `connect()` performs the handshake but throws away
-    /// the READY frame, which is exactly where Discord hands back the local
-    /// user. We run the handshake by hand so we can keep the name for the
-    /// personalized idle phrases. No OAuth or extra scopes are involved. The
-    /// basic RPC handshake returns the current user on its own.
+    /// Open an IPC connection and send Discord's handshake. Do not wait for the
+    /// optional READY metadata: the Windows named-pipe read has no timeout and a
+    /// stalled Discord process would otherwise block StreamNook indefinitely.
     fn connect_client() -> Result<(DiscordIpcClient, Option<String>)> {
         let mut client = DiscordIpcClient::new(DISCORD_CLIENT_ID);
         client.connect_ipc()?;
         client.send(json!({ "v": 1, "client_id": DISCORD_CLIENT_ID }), 0)?;
-
-        // READY frame: { "evt": "READY", "data": { "user": { "global_name", "username", ... } } }
-        let username = match client.recv() {
-            Ok((_, value)) => {
-                let user = value.get("data").and_then(|d| d.get("user"));
-                user.and_then(|u| u.get("global_name").and_then(|v| v.as_str()))
-                    .filter(|s| !s.is_empty())
-                    .or_else(|| user.and_then(|u| u.get("username").and_then(|v| v.as_str())))
-                    .map(|s| s.to_string())
-            }
-            Err(_) => None,
-        };
-
-        Ok((client, username))
+        Ok((client, None))
     }
 
     /// A call-to-action button with a randomly chosen, often cheeky label. The

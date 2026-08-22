@@ -64,6 +64,13 @@ itzon account in Settings > Connections.
 - Dynamic itzon channel and HLS-edge resolution.
 - A local HLS relay that supports relative standard LL-HLS init, part, and media
   resources in addition to the existing Twitch path.
+- Solo playback mirrors itzon's desktop RTT tiers instead of forcing every
+  connection into low-latency mode: nearby LL origins use a 2.5/8-second live
+  window, midrange connections use 5/12, and connections above 80 ms use 10/24.
+  This keeps distant viewers from repeatedly draining an undersized buffer.
+- The solo player header and sidebar share the same itzon avatar renderer, so a
+  missing or failed avatar uses the site's deterministic color and username
+  initial in both places.
 - Per-stream itzon viewer heartbeats, stopped when a tile or the grid closes.
 - Provider-aware metadata refresh, duplicate handling, persistence, and tile
   source markers.
@@ -215,11 +222,12 @@ itzon account in Settings > Connections.
   ignored tests. This includes the single-token itzon IRC normalization
   regression, the repaired unknown-emoji-shortcode fallback, and a session
   expiry guard proving a stale validation cannot clear a replacement login.
-- The full discovered frontend test surface passes: 44 tests, zero failures.
-  Five specifically cover this milestone. Two cover the shared-attempt gate
+- The full discovered frontend test surface passes: 46 tests, zero failures.
+  Six specifically cover this milestone. Two cover the shared-attempt gate
   (concurrent callers share one attempt; rejection clears for recovery), and
   three cover provider send independence (Twitch requires its OAuth identity,
-  while Itzon, Kick, and YouTube use their own authenticated state).
+  while Itzon, Kick, and YouTube use their own authenticated state). One locks
+  itzon's near, midrange, and far desktop HLS latency tiers.
 - The current frontend production build passes. Targeted ESLint reports no
   errors in the provider/chat changes. Full-project ESLint was also run and
   remains nonzero with 26 errors in 13 pre-existing unrelated files; the one

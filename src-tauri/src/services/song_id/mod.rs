@@ -26,11 +26,10 @@ pub async fn identify(samples: Vec<i16>) -> Result<Option<SongMatch>, String> {
 
     // Fingerprinting is a synchronous CPU burst (FFTs over the whole clip), so
     // run it off the async runtime to avoid stalling other tasks.
-    let signature = tokio::task::spawn_blocking(move || {
-        SignatureGenerator::make_signature_from_buffer(samples)
-    })
-    .await
-    .map_err(|e| format!("fingerprinting task failed: {}", e))?;
+    let signature =
+        tokio::task::spawn_blocking(move || SignatureGenerator::make_signature_from_buffer(samples))
+            .await
+            .map_err(|e| format!("fingerprinting task failed: {}", e))?;
 
     let mut result = shazam::recognize(&signature).await?;
 

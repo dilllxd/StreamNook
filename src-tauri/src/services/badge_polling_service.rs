@@ -118,7 +118,11 @@ impl BadgeFeedState {
     fn to_file(&self) -> BadgeFeedStateFile {
         BadgeFeedStateFile {
             known_badges: self.known_badges.iter().cloned().collect(),
-            notified_available_badges: self.notified_available_badges.iter().cloned().collect(),
+            notified_available_badges: self
+                .notified_available_badges
+                .iter()
+                .cloned()
+                .collect(),
             content_hashes: self.content_hashes.clone(),
             last_poll_timestamp_ms: self.last_poll_timestamp_ms,
         }
@@ -224,7 +228,9 @@ pub async fn record(feed_id: &str, content_hash: &str, action: FeedAction, is_av
     // Latched on first sight of an open window too, so a badge that arrives
     // already available never announces itself twice.
     if is_available || action == FeedAction::NotifyAvailable {
-        state.notified_available_badges.insert(feed_id.to_string());
+        state
+            .notified_available_badges
+            .insert(feed_id.to_string());
     }
 }
 
@@ -278,10 +284,7 @@ mod tests {
 
     #[test]
     fn content_hash_is_stable_for_identical_payloads() {
-        assert_eq!(
-            badge("Spider-Man").content_hash(),
-            badge("Spider-Man").content_hash()
-        );
+        assert_eq!(badge("Spider-Man").content_hash(), badge("Spider-Man").content_hash());
     }
 
     #[test]

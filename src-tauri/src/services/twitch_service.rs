@@ -3098,32 +3098,18 @@ impl TwitchService {
                     .map(|arr| {
                         arr.iter()
                             .filter_map(|t| {
-                                t.get("name")
-                                    .and_then(|n| n.as_str())
-                                    .map(|s| s.to_string())
+                                t.get("name").and_then(|n| n.as_str()).map(|s| s.to_string())
                             })
                             .collect()
                     })
                     .unwrap_or_default();
 
                 streams.push(TwitchStream {
-                    id: node
-                        .get("id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    user_id: broadcaster
-                        .get("id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
+                    id: node.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    user_id: broadcaster.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
                     user_name,
                     user_login,
-                    title: node
-                        .get("title")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
+                    title: node.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string(),
                     viewer_count: node
                         .get("viewersCount")
                         .and_then(|v| v.as_u64())
@@ -3135,20 +3121,12 @@ impl TwitchService {
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string(),
-                    started_at: node
-                        .get("createdAt")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
+                    started_at: node.get("createdAt").and_then(|v| v.as_str()).unwrap_or("").to_string(),
                     broadcaster_type,
                     has_shared_chat: None,
                     profile_image_url,
                     is_live: Some(true),
-                    tags: if stream_tags.is_empty() {
-                        None
-                    } else {
-                        Some(stream_tags)
-                    },
+                    tags: if stream_tags.is_empty() { None } else { Some(stream_tags) },
                 });
             }
         }
@@ -4780,13 +4758,8 @@ impl TwitchService {
             payload["channel_points_per_vote"] = serde_json::json!(cost);
         }
 
-        Self::helix_json_post(
-            "https://api.twitch.tv/helix/polls",
-            &token,
-            payload,
-            "create poll",
-        )
-        .await
+        Self::helix_json_post("https://api.twitch.tv/helix/polls", &token, payload, "create poll")
+            .await
     }
 
     /// Add an AutoMod blocked term. Needs `moderator:manage:blocked_terms`.
@@ -4799,13 +4772,8 @@ impl TwitchService {
             "https://api.twitch.tv/helix/moderation/blocked_terms?broadcaster_id={}&moderator_id={}",
             broadcaster_id, moderator_id
         );
-        Self::helix_json_post(
-            &url,
-            &token,
-            serde_json::json!({ "text": text }),
-            "add blocked term",
-        )
-        .await
+        Self::helix_json_post(&url, &token, serde_json::json!({ "text": text }), "add blocked term")
+            .await
     }
 
     /// Remove a blocked term by its phrase.
@@ -4839,9 +4807,7 @@ impl TwitchService {
                 })
             })
             .and_then(|r| r["id"].as_str().map(String::from))
-            .ok_or_else(|| {
-                anyhow::anyhow!("\"{}\" is not in the blocked terms list", text.trim())
-            })?;
+            .ok_or_else(|| anyhow::anyhow!("\"{}\" is not in the blocked terms list", text.trim()))?;
 
         let del_url = format!(
             "https://api.twitch.tv/helix/moderation/blocked_terms?broadcaster_id={}&moderator_id={}&id={}",
@@ -4883,32 +4849,21 @@ impl TwitchService {
         let value = Self::helix_json_result(response, "get polls").await?;
         // Helix returns the most recent poll regardless of state, so an ended
         // one must not be reported as live.
-        let poll = value["data"]
-            .get(0)
-            .cloned()
-            .filter(|p| matches!(p["status"].as_str(), Some("ACTIVE")));
+        let poll = value["data"].get(0).cloned().filter(|p| {
+            matches!(p["status"].as_str(), Some("ACTIVE"))
+        });
         Ok(poll)
     }
 
     /// End a poll. `status` is TERMINATED (show the result) or ARCHIVED (hide it).
-    pub async fn end_poll(
-        broadcaster_id: &str,
-        poll_id: &str,
-        status: &str,
-    ) -> Result<serde_json::Value> {
+    pub async fn end_poll(broadcaster_id: &str, poll_id: &str, status: &str) -> Result<serde_json::Value> {
         let token = Self::get_token().await?;
         let payload = serde_json::json!({
             "broadcaster_id": broadcaster_id,
             "id": poll_id,
             "status": status,
         });
-        Self::helix_json_patch(
-            "https://api.twitch.tv/helix/polls",
-            &token,
-            payload,
-            "end poll",
-        )
-        .await
+        Self::helix_json_patch("https://api.twitch.tv/helix/polls", &token, payload, "end poll").await
     }
 
     /// Create a prediction. Broadcaster-only (`channel:manage:predictions`).

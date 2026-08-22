@@ -49,9 +49,9 @@ mod imp {
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         EnumChildWindows, EnumThreadWindows, GetClassNameW, GetForegroundWindow, GetGUIThreadInfo,
-        GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
-        IsWindowVisible, SendMessageTimeoutW, GUITHREADINFO, GUI_INMENUMODE, GUI_INMOVESIZE,
-        GUI_POPUPMENUMODE, GUI_SYSTEMMENUMODE, SMTO_ABORTIFHUNG, SMTO_BLOCK, WM_NULL,
+        GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible,
+        SendMessageTimeoutW, GUITHREADINFO, GUI_INMENUMODE, GUI_INMOVESIZE, GUI_POPUPMENUMODE,
+        GUI_SYSTEMMENUMODE, SMTO_ABORTIFHUNG, SMTO_BLOCK, WM_NULL,
     };
 
     // Probe cadence when healthy, and the blocking timeout that defines "the pump
@@ -186,12 +186,8 @@ mod imp {
             };
             let mut buf = [0u16; 260];
             let mut len = buf.len() as u32;
-            let res = QueryFullProcessImageNameW(
-                handle,
-                PROCESS_NAME_WIN32,
-                PWSTR(buf.as_mut_ptr()),
-                &mut len,
-            );
+            let res =
+                QueryFullProcessImageNameW(handle, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len);
             let _ = CloseHandle(handle);
             if res.is_err() {
                 return;

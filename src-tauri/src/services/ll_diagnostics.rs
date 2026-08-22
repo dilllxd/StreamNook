@@ -78,8 +78,7 @@ fn ensure_writer() {
                         continue;
                     }
                     if let Some((_, f)) = current.as_mut() {
-                        let mut out =
-                            String::with_capacity(batch.iter().map(|l| l.len() + 1).sum());
+                        let mut out = String::with_capacity(batch.iter().map(|l| l.len() + 1).sum());
                         for l in &batch {
                             out.push_str(l);
                             out.push('\n');
@@ -109,11 +108,7 @@ pub fn start_session(label: &str) -> std::io::Result<PathBuf> {
         .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
         .take(40)
         .collect();
-    let safe = if safe.is_empty() {
-        "session".to_string()
-    } else {
-        safe
-    };
+    let safe = if safe.is_empty() { "session".to_string() } else { safe };
     let mut path = diag_dir();
     path.push(format!("lldiag-{safe}-{ts}.jsonl"));
     File::create(&path)?; // create/truncate
@@ -138,9 +133,7 @@ pub fn append_lines(lines: &[String], session_path: &str) {
         return;
     }
     let mut s = SHARED.lock().unwrap();
-    let Some(path) = s.desired.as_ref() else {
-        return;
-    };
+    let Some(path) = s.desired.as_ref() else { return };
     if path.to_string_lossy() != session_path {
         return;
     }
@@ -151,10 +144,7 @@ pub fn append_lines(lines: &[String], session_path: &str) {
 /// `append_lines`: a stale recorder's teardown must not kill a newer capture).
 pub fn stop_session(session_path: &str) {
     let mut s = SHARED.lock().unwrap();
-    if s.desired
-        .as_ref()
-        .is_some_and(|p| p.to_string_lossy() == session_path)
-    {
+    if s.desired.as_ref().is_some_and(|p| p.to_string_lossy() == session_path) {
         s.desired = None;
         ACTIVE.store(false, Ordering::Relaxed);
     }
@@ -187,10 +177,6 @@ pub fn event(body: &str) {
     if !ACTIVE.load(Ordering::Relaxed) {
         return;
     }
-    let line = format!(
-        "{{\"t\":{},{}}}",
-        chrono::Utc::now().timestamp_millis(),
-        body
-    );
+    let line = format!("{{\"t\":{},{}}}", chrono::Utc::now().timestamp_millis(), body);
     SHARED.lock().unwrap().queue.push(line);
 }

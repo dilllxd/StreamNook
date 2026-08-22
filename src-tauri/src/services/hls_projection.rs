@@ -223,14 +223,8 @@ mod tests {
         stabilize("a", pl_a, "https://cdn/");
         stabilize("b", pl_b, "https://cdn/");
         // Same sn 50 in two sessions resolves to each session's own segment.
-        assert_eq!(
-            redirect_target("a", 50).as_deref(),
-            Some("https://cdn/aaa50.ts")
-        );
-        assert_eq!(
-            redirect_target("b", 50).as_deref(),
-            Some("https://cdn/bbb50.ts")
-        );
+        assert_eq!(redirect_target("a", 50).as_deref(), Some("https://cdn/aaa50.ts"));
+        assert_eq!(redirect_target("b", 50).as_deref(), Some("https://cdn/bbb50.ts"));
         clear("a");
         clear("b");
     }
@@ -264,10 +258,7 @@ mod tests {
             "https://cdn/",
         );
         assert!(redirect_target("rs", 900).is_none());
-        assert_eq!(
-            redirect_target("rs", 3).as_deref(),
-            Some("https://cdn/y3.ts")
-        );
+        assert_eq!(redirect_target("rs", 3).as_deref(), Some("https://cdn/y3.ts"));
         clear("rs");
     }
 
@@ -283,14 +274,8 @@ mod tests {
 
     #[test]
     fn vseg_path_parsing() {
-        assert_eq!(
-            parse_vseg_path("vseg/solo/12.ts"),
-            Some(("solo".into(), 12))
-        );
-        assert_eq!(
-            parse_vseg_path("vseg/tile-3/0.ts"),
-            Some(("tile-3".into(), 0))
-        );
+        assert_eq!(parse_vseg_path("vseg/solo/12.ts"), Some(("solo".into(), 12)));
+        assert_eq!(parse_vseg_path("vseg/tile-3/0.ts"), Some(("tile-3".into(), 0)));
         // Not a projection request.
         assert_eq!(parse_vseg_path("seg/12.ts"), None);
         assert_eq!(parse_vseg_path("stream.m3u8"), None);
@@ -346,10 +331,7 @@ mod tests {
             if let Some((_, url_b, cc_b)) = sb.iter().find(|(sn_b, _, _)| sn_b == sn_a) {
                 overlap += 1;
                 assert_eq!(url_a, url_b, "{label}: url path mismatch at sn {sn_a}");
-                assert_eq!(
-                    cc_a, cc_b,
-                    "{label}: cc mismatch at sn {sn_a} ({cc_a}!={cc_b})"
-                );
+                assert_eq!(cc_a, cc_b, "{label}: cc mismatch at sn {sn_a} ({cc_a}!={cc_b})");
             }
         }
         assert!(overlap >= 1, "{label}: expected SN overlap, got none");
@@ -369,10 +351,7 @@ mod tests {
 #EXTINF:2.0,live\nhttps://cdn/TOKb/202.ts?s=2\n";
         // Sanity: raw IS inconsistent (sn 201 path TOKa/201 vs TOKb/201).
         let raw = std::panic::catch_unwind(|| assert_refresh_consistent(raw_n, raw_n1, "raw"));
-        assert!(
-            raw.is_err(),
-            "raw polls should be inconsistent (proves the trap)"
-        );
+        assert!(raw.is_err(), "raw polls should be inconsistent (proves the trap)");
         // Stabilized is consistent.
         let s_n = stabilize("inv", raw_n, "https://cdn/");
         let s_n1 = stabilize("inv", raw_n1, "https://cdn/");

@@ -330,10 +330,6 @@ export function EmotePickerPanel({
     }
   }, [open]);
 
-  useEffect(() => {
-    setSelectedProvider(defaultProvider);
-  }, [defaultProvider]);
-
   // Aggressive disk caching while the picker is open; polite trickle on close.
   useEffect(() => {
     if (!open) return;

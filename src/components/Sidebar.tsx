@@ -329,22 +329,29 @@ const Sidebar = ({ side = 'left' }: { side?: 'left' | 'right' }) => {
     const [itzonFollowedStreams, setItzonFollowedStreams] = useState<TwitchStream[]>([]);
     const [itzonRecommendedStreams, setItzonRecommendedStreams] = useState<TwitchStream[]>([]);
 
-    const loadItzonStreams = useCallback(async () => {
-        try {
-            const snapshot = await itzonSidebarLoadGate.run(async () => {
-                const [explore, following] = await Promise.all([
-                    getItzonExplore(),
-                    getItzonFollowing(),
-                ]);
-                const streams = explore.streams.map(itzonStreamToTwitchStream);
-                return partitionItzonStreams(streams, following);
-            });
-            setItzonFollowedStreams(snapshot.followed);
-            setItzonRecommendedStreams(snapshot.recommended);
-        } catch (error) {
-            Logger.warn('[Sidebar] Could not load itzon streams:', error);
-        }
+    const fetchItzonStreams = useCallback(
+        () => itzonSidebarLoadGate.run(async () => {
+            const [explore, following] = await Promise.all([
+                getItzonExplore(),
+                getItzonFollowing(),
+            ]);
+            return partitionItzonStreams(explore.streams.map(itzonStreamToTwitchStream), following);
+        }),
+        [],
+    );
+
+    const applyItzonStreams = useCallback((snapshot: { followed: TwitchStream[]; recommended: TwitchStream[] }) => {
+        setItzonFollowedStreams(snapshot.followed);
+        setItzonRecommendedStreams(snapshot.recommended);
     }, []);
+
+    const reportItzonStreamError = useCallback((error: unknown) => {
+        Logger.warn('[Sidebar] Could not load itzon streams:', error);
+    }, []);
+
+    const loadItzonStreams = useCallback(() => {
+        void fetchItzonStreams().then(applyItzonStreams, reportItzonStreamError);
+    }, [applyItzonStreams, fetchItzonStreams, reportItzonStreamError]);
 
     useEffect(() => {
         const unlisten = listen('itzon-connection-changed', () => {
@@ -515,8 +522,8 @@ const Sidebar = ({ side = 'left' }: { side?: 'left' | 'right' }) => {
             loadFollowedStreams();
         }
         loadRecommendedStreams();
-        loadItzonStreams();
-    }, [isAuthenticated, loadFollowedStreams, loadItzonStreams, loadRecommendedStreams]);
+        void fetchItzonStreams().then(applyItzonStreams, reportItzonStreamError);
+    }, [applyItzonStreams, fetchItzonStreams, isAuthenticated, loadFollowedStreams, loadRecommendedStreams, reportItzonStreamError]);
 
     // Track previous "sidebar visible" state to detect rising edge (opening)
     const prevSidebarVisibleRef = useRef(false);
@@ -548,7 +555,7 @@ const Sidebar = ({ side = 'left' }: { side?: 'left' | 'right' }) => {
     // Constant background freshness (every 3 minutes)
     // Ensures sidebar is fresh even if user hasn't opened/closed it in hours.
     // Visibility-gated: tray-backgrounded sessions stop syncing entirely.
-    const backgroundStreamSync = useCallback(() => {
+    useVisibleInterval(() => {
         const isSidebarVisible = isHovered || isEdgeHovered || isManuallyExpanded;
         // In collapsible modes, only sync while HIDDEN to avoid mid-reading layout
         // shifts. Expanded mode is always on-screen, but rows now reconcile in
@@ -560,8 +567,7 @@ const Sidebar = ({ side = 'left' }: { side?: 'left' | 'right' }) => {
             }
             loadItzonStreams();
         }
-    }, [isHovered, isEdgeHovered, isManuallyExpanded, isAuthenticated, loadFollowedStreams, loadItzonStreams, sidebarMode]);
-    useVisibleInterval(backgroundStreamSync, 3 * 60 * 1000);
+    }, 3 * 60 * 1000);
 
     // Infinite scroll for recommended streams
     useEffect(() => {

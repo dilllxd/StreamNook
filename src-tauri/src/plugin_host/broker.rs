@@ -45,9 +45,7 @@ pub async fn handle_host_method(
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| RpcErr::invalid_params("playlist_url is required"))?;
             if !playlist_url.starts_with("http://") && !playlist_url.starts_with("https://") {
-                return Err(RpcErr::invalid_params(
-                    "playlist_url must be an http(s) URL",
-                ));
+                return Err(RpcErr::invalid_params("playlist_url must be an http(s) URL"));
             }
             // Route to the matching relay session: the solo player's session
             // (stream id "solo") or a MultiNook tile by its id. The swap keeps
@@ -87,14 +85,9 @@ pub async fn handle_host_method(
         }
         "notify" => {
             require_method(record, "notify")?;
-            let level = params
-                .get("level")
-                .and_then(|v| v.as_str())
-                .unwrap_or("info");
+            let level = params.get("level").and_then(|v| v.as_str()).unwrap_or("info");
             if !matches!(level, "info" | "warning" | "error") {
-                return Err(RpcErr::invalid_params(
-                    "level must be info, warning, or error",
-                ));
+                return Err(RpcErr::invalid_params("level must be info, warning, or error"));
             }
             let message = params
                 .get("message")
@@ -123,9 +116,10 @@ pub async fn handle_host_method(
                 .map_err(|e| RpcErr::internal(&e.to_string()))?;
             registry::write_json_file(&path, &schema)
                 .map_err(|e| RpcErr::internal(&e.to_string()))?;
-            let _ = host
-                .app
-                .emit("plugin://panels-changed", json!({ "plugin_id": record.id }));
+            let _ = host.app.emit(
+                "plugin://panels-changed",
+                json!({ "plugin_id": record.id }),
+            );
             Ok(json!({}))
         }
         "get_panel_values" => {
@@ -153,9 +147,7 @@ fn require_ui_panel(record: &InstalledPlugin) -> Result<(), RpcErr> {
     if record.granted.ui.iter().any(|u| u == "panel") {
         Ok(())
     } else {
-        Err(RpcErr::capability_denied(
-            "ui capability 'panel' is not granted",
-        ))
+        Err(RpcErr::capability_denied("ui capability 'panel' is not granted"))
     }
 }
 
@@ -241,7 +233,10 @@ async fn get_credential(
             let token = DropsAuthService::get_token()
                 .await
                 .map_err(|e| RpcErr::credential_unavailable(&e.to_string()))?;
-            registry::audit_append(&record.id, "credential handover kind=twitch.android");
+            registry::audit_append(
+                &record.id,
+                "credential handover kind=twitch.android",
+            );
             debug!(
                 "[PluginHost] credential twitch.android handed to {}",
                 record.id
@@ -300,18 +295,14 @@ fn validate_panel_schema(schema: &Value) -> Result<(), RpcErr> {
         .and_then(|t| t.as_str())
         .ok_or_else(|| RpcErr::invalid_params("panel schema needs a title"))?;
     if title.is_empty() || title.chars().count() > 60 {
-        return Err(RpcErr::invalid_params(
-            "panel title must be 1 to 60 characters",
-        ));
+        return Err(RpcErr::invalid_params("panel title must be 1 to 60 characters"));
     }
     let sections = schema
         .get("sections")
         .and_then(|s| s.as_array())
         .ok_or_else(|| RpcErr::invalid_params("panel schema needs a sections array"))?;
     if sections.len() > 8 {
-        return Err(RpcErr::invalid_params(
-            "panel schema allows at most 8 sections",
-        ));
+        return Err(RpcErr::invalid_params("panel schema allows at most 8 sections"));
     }
     for section in sections {
         let fields = section
@@ -386,10 +377,7 @@ pub fn handle_set_status(host: &Arc<HostInner>, record: &InstalledPlugin, params
 
 /// `log` notification from a plugin: append to its log file, never answered.
 pub fn handle_log_notification(record: &InstalledPlugin, params: &Value) {
-    let level = params
-        .get("level")
-        .and_then(|v| v.as_str())
-        .unwrap_or("info");
+    let level = params.get("level").and_then(|v| v.as_str()).unwrap_or("info");
     let message = params.get("message").and_then(|v| v.as_str()).unwrap_or("");
     append_plugin_log(&record.id, level, message);
 }

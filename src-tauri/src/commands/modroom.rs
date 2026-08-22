@@ -56,9 +56,7 @@ pub async fn modroom_connect(app: AppHandle) -> Result<ModRoomStatus, String> {
         return Err(format!("Consent was cancelled or failed: {}", err));
     }
     if callback.state.as_deref() != Some(state.as_str()) {
-        return Err(
-            "Consent could not be verified (state mismatch). Please try again.".to_string(),
-        );
+        return Err("Consent could not be verified (state mismatch). Please try again.".to_string());
     }
     if callback.code.is_empty() {
         return Err("Twitch did not return an authorization code.".to_string());
@@ -154,10 +152,7 @@ pub async fn modroom_get_room_token(channel_id: String) -> Result<RoomToken, Str
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string(),
-        expires_at: body
-            .get("expiresAt")
-            .and_then(|v| v.as_i64())
-            .unwrap_or_default(),
+        expires_at: body.get("expiresAt").and_then(|v| v.as_i64()).unwrap_or_default(),
         ttl: body.get("ttl").and_then(|v| v.as_i64()).unwrap_or_default(),
         room_key: body
             .get("roomKey")

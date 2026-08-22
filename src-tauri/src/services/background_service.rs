@@ -69,56 +69,54 @@ impl BackgroundService {
         // channels via the balance poll). The single source for the lifetime
         // stats the Drops center shows.
         let drops_service_for_stats = self.drops_service.clone();
-        self.app_handle
-            .listen("channel-points-earned", move |event| {
-                let drops_service = drops_service_for_stats.clone();
-                tokio::spawn(async move {
-                    if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event.payload())
-                    {
-                        let channel_id = payload["channel_id"].as_str().map(|s| s.to_string());
-                        let points = payload["points"].as_i64().unwrap_or(0) as i32;
-                        let reason = payload["reason"].as_str().unwrap_or("watch");
-                        let balance = payload["balance"].as_i64().unwrap_or(0) as i32;
-                        // Prefer the login (helix lookups + leaderboard key on it),
-                        // fall back to the display name.
-                        let channel_name = payload["channel_login"]
-                            .as_str()
-                            .or_else(|| payload["channel_display_name"].as_str())
-                            .unwrap_or("")
-                            .to_string();
+        self.app_handle.listen("channel-points-earned", move |event| {
+            let drops_service = drops_service_for_stats.clone();
+            tokio::spawn(async move {
+                if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event.payload()) {
+                    let channel_id = payload["channel_id"].as_str().map(|s| s.to_string());
+                    let points = payload["points"].as_i64().unwrap_or(0) as i32;
+                    let reason = payload["reason"].as_str().unwrap_or("watch");
+                    let balance = payload["balance"].as_i64().unwrap_or(0) as i32;
+                    // Prefer the login (helix lookups + leaderboard key on it),
+                    // fall back to the display name.
+                    let channel_name = payload["channel_login"]
+                        .as_str()
+                        .or_else(|| payload["channel_display_name"].as_str())
+                        .unwrap_or("")
+                        .to_string();
 
-                        let ds = drops_service.lock().await;
+                    let ds = drops_service.lock().await;
 
-                        // Keep the per-channel balance current for the leaderboard
-                        // and the points accolades.
-                        if balance > 0 {
-                            if let Some(cid) = channel_id.as_deref() {
-                                ds.update_channel_points_balance(cid, &channel_name, balance)
-                                    .await;
-                            }
-                        }
-
-                        if points > 0 {
-                            debug!("Channel points earned: +{} ({})", points, reason);
-                            let claim = ChannelPointsClaim {
-                                id: uuid::Uuid::new_v4().to_string(),
-                                channel_id: channel_id.unwrap_or_default(),
-                                channel_name,
-                                points_earned: points,
-                                claimed_at: Utc::now(),
-                                claim_type: match reason {
-                                    "WATCH" | "watch" => ChannelPointsClaimType::Watch,
-                                    "CLAIM" | "claim" | "AUTOMATION" | "automation" => {
-                                        ChannelPointsClaimType::Bonus
-                                    }
-                                    _ => ChannelPointsClaimType::Watch,
-                                },
-                            };
-                            ds.add_channel_points_claim(claim).await;
+                    // Keep the per-channel balance current for the leaderboard
+                    // and the points accolades.
+                    if balance > 0 {
+                        if let Some(cid) = channel_id.as_deref() {
+                            ds.update_channel_points_balance(cid, &channel_name, balance)
+                                .await;
                         }
                     }
-                });
+
+                    if points > 0 {
+                        debug!("Channel points earned: +{} ({})", points, reason);
+                        let claim = ChannelPointsClaim {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            channel_id: channel_id.unwrap_or_default(),
+                            channel_name,
+                            points_earned: points,
+                            claimed_at: Utc::now(),
+                            claim_type: match reason {
+                                "WATCH" | "watch" => ChannelPointsClaimType::Watch,
+                                "CLAIM" | "claim" | "AUTOMATION" | "automation" => {
+                                    ChannelPointsClaimType::Bonus
+                                }
+                                _ => ChannelPointsClaimType::Watch,
+                            },
+                        };
+                        ds.add_channel_points_claim(claim).await;
+                    }
+                }
             });
+        });
     }
 
     /// Point the realtime socket at the channel now on screen: subscribes its
@@ -138,8 +136,7 @@ impl BackgroundService {
         };
 
         let mut ws = self.websocket_service.lock().await;
-        ws.register_channel_mapping(&channel_id, &login, &login)
-            .await;
+        ws.register_channel_mapping(&channel_id, &login, &login).await;
         if let Err(e) = ws
             .connect_to_channels(
                 vec![channel_id.clone()],
@@ -203,7 +200,11 @@ impl BackgroundService {
                     continue;
                 };
 
-                let watched_id = watched.read().await.as_ref().map(|(id, _)| id.clone());
+                let watched_id = watched
+                    .read()
+                    .await
+                    .as_ref()
+                    .map(|(id, _)| id.clone());
 
                 for (channel_id, login, display_name, balance) in &balances {
                     let prev = baseline.insert(channel_id.clone(), *balance);

@@ -54,68 +54,28 @@ impl RpcErr {
         })
     }
     pub fn capability_denied(detail: &str) -> Self {
-        Self {
-            code: -32000,
-            message: format!("capability denied: {detail}"),
-            name: "capability_denied",
-            retry_after_ms: None,
-        }
+        Self { code: -32000, message: format!("capability denied: {detail}"), name: "capability_denied", retry_after_ms: None }
     }
     pub fn consent_denied() -> Self {
-        Self {
-            code: -32001,
-            message: "the user declined or revoked consent".into(),
-            name: "consent_denied",
-            retry_after_ms: None,
-        }
+        Self { code: -32001, message: "the user declined or revoked consent".into(), name: "consent_denied", retry_after_ms: None }
     }
     pub fn unknown_stream(id: &str) -> Self {
-        Self {
-            code: -32002,
-            message: format!("no active relay session for stream '{id}'"),
-            name: "unknown_stream",
-            retry_after_ms: None,
-        }
+        Self { code: -32002, message: format!("no active relay session for stream '{id}'"), name: "unknown_stream", retry_after_ms: None }
     }
     pub fn rate_limited(retry_after_ms: u64) -> Self {
-        Self {
-            code: -32003,
-            message: "rate limited".into(),
-            name: "rate_limited",
-            retry_after_ms: Some(retry_after_ms),
-        }
+        Self { code: -32003, message: "rate limited".into(), name: "rate_limited", retry_after_ms: Some(retry_after_ms) }
     }
     pub fn credential_unavailable(detail: &str) -> Self {
-        Self {
-            code: -32005,
-            message: format!("credential unavailable: {detail}"),
-            name: "credential_unavailable",
-            retry_after_ms: None,
-        }
+        Self { code: -32005, message: format!("credential unavailable: {detail}"), name: "credential_unavailable", retry_after_ms: None }
     }
     pub fn invalid_params(detail: &str) -> Self {
-        Self {
-            code: -32602,
-            message: format!("invalid params: {detail}"),
-            name: "invalid_params",
-            retry_after_ms: None,
-        }
+        Self { code: -32602, message: format!("invalid params: {detail}"), name: "invalid_params", retry_after_ms: None }
     }
     pub fn method_not_found(method: &str) -> Self {
-        Self {
-            code: -32601,
-            message: format!("method not found: {method}"),
-            name: "method_not_found",
-            retry_after_ms: None,
-        }
+        Self { code: -32601, message: format!("method not found: {method}"), name: "method_not_found", retry_after_ms: None }
     }
     pub fn internal(detail: &str) -> Self {
-        Self {
-            code: -32603,
-            message: format!("internal error: {detail}"),
-            name: "internal",
-            retry_after_ms: None,
-        }
+        Self { code: -32603, message: format!("internal error: {detail}"), name: "internal", retry_after_ms: None }
     }
 }
 
@@ -259,14 +219,14 @@ async fn run_once(host: &Arc<HostInner>, record: &InstalledPlugin) -> RunOutcome
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default(),
     });
-    let init_result =
-        match request(&writer, &pending, &next_id, "initialize", init_params, 10).await {
-            Ok(v) => v,
-            Err(e) => {
-                let _ = child.kill().await;
-                return RunOutcome::Crashed(format!("initialize failed: {e}"));
-            }
-        };
+    let init_result = match request(&writer, &pending, &next_id, "initialize", init_params, 10).await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            let _ = child.kill().await;
+            return RunOutcome::Crashed(format!("initialize failed: {e}"));
+        }
+    };
     let hooks: Vec<String> = init_result
         .get("hooks")
         .and_then(|h| h.as_array())
@@ -282,10 +242,7 @@ async fn run_once(host: &Arc<HostInner>, record: &InstalledPlugin) -> RunOutcome
         .and_then(|v| v.as_str())
         .unwrap_or("unknown")
         .to_string();
-    if notify_frame(&writer, "initialized", json!({}))
-        .await
-        .is_err()
-    {
+    if notify_frame(&writer, "initialized", json!({})).await.is_err() {
         let _ = child.kill().await;
         return RunOutcome::Crashed("failed to send initialized".into());
     }
@@ -432,10 +389,7 @@ async fn route_frame(
     frame: Value,
 ) {
     let has_id = frame.get("id").is_some();
-    let method = frame
-        .get("method")
-        .and_then(|m| m.as_str())
-        .map(|s| s.to_string());
+    let method = frame.get("method").and_then(|m| m.as_str()).map(|s| s.to_string());
 
     match (has_id, method) {
         // Response to one of our requests.
@@ -482,10 +436,7 @@ async fn route_frame(
             }
         }
         (false, None) => {
-            debug!(
-                "[PluginHost] {} sent a frame with no method or id",
-                record.id
-            );
+            debug!("[PluginHost] {} sent a frame with no method or id", record.id);
         }
     }
 }

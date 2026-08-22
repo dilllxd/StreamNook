@@ -187,9 +187,7 @@ async fn resolve_ids(http: &reqwest::Client, channel_id: &str) -> (Option<String
                 }
             }
         };
-    let Some(json) = json else {
-        return (None, None);
-    };
+    let Some(json) = json else { return (None, None) };
     let emote_set_id = emote_service::seventv_active_set_id(&json);
     let seventv_user_id = json
         .pointer("/id")

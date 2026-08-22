@@ -24,10 +24,7 @@ fn gql_headers(token: &str) -> reqwest::header::HeaderMap {
     let device_id = uuid::Uuid::new_v4().to_string().replace('-', "");
     let session_id = uuid::Uuid::new_v4().to_string().replace('-', "");
     let mut headers = HeaderMap::new();
-    headers.insert(
-        "Client-ID",
-        HeaderValue::from_static(TWITCH_ANDROID_CLIENT_ID),
-    );
+    headers.insert("Client-ID", HeaderValue::from_static(TWITCH_ANDROID_CLIENT_ID));
     headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
     headers.insert("Accept-Encoding", HeaderValue::from_static("gzip"));
     headers.insert(
@@ -174,31 +171,14 @@ pub async fn fetch_user_chat_logs(
     // the slow source. Each capped so one bad source can't stall the fast batch.
     let src_cap = std::time::Duration::from_secs(6);
     let (twitch_modlogs_result, twitch_buffer_result, robotty_result) = tokio::join!(
-        async {
-            tokio::time::timeout(src_cap, twitch_modlogs_fut)
-                .await
-                .unwrap_or_else(|_| Ok(Vec::new()))
-        },
-        async {
-            tokio::time::timeout(src_cap, twitch_buffer_fut)
-                .await
-                .unwrap_or_else(|_| Ok(Vec::new()))
-        },
-        async {
-            tokio::time::timeout(
-                src_cap,
-                fetch_from_robotty(&client, &channel_lower, &username_lower),
-            )
-            .await
-            .unwrap_or_else(|_| Ok(Vec::new()))
-        },
+        async { tokio::time::timeout(src_cap, twitch_modlogs_fut).await.unwrap_or_else(|_| Ok(Vec::new())) },
+        async { tokio::time::timeout(src_cap, twitch_buffer_fut).await.unwrap_or_else(|_| Ok(Vec::new())) },
+        async { tokio::time::timeout(src_cap, fetch_from_robotty(&client, &channel_lower, &username_lower)).await.unwrap_or_else(|_| Ok(Vec::new())) },
     );
 
     // Per-source diagnostic. Count: -1 = errored, 0 = empty, >0 = messages.
-    let count_of =
-        |r: &Result<Vec<JustlogMessage>, String>| r.as_ref().map(|m| m.len() as i64).unwrap_or(-1);
-    let err_of =
-        |r: &Result<Vec<JustlogMessage>, String>| r.as_ref().err().cloned().unwrap_or_default();
+    let count_of = |r: &Result<Vec<JustlogMessage>, String>| r.as_ref().map(|m| m.len() as i64).unwrap_or(-1);
+    let err_of = |r: &Result<Vec<JustlogMessage>, String>| r.as_ref().err().cloned().unwrap_or_default();
     eprintln!(
         "[chatlogs/fast] channel={} user={} -> modlogs={} buffer={} robotty={}\n  modlogs_err=[{}]\n  buffer_err=[{}]\n  robotty_err=[{}]",
         channel_lower,
@@ -250,12 +230,9 @@ pub async fn fetch_user_deep_logs(
     // Generous cap: this is OFF the card's critical path, so we'd rather wait for
     // a slow proxy (a heavy chatter's full history measured ~7s) than drop it.
     let cap = std::time::Duration::from_secs(15);
-    let result = tokio::time::timeout(
-        cap,
-        fetch_from_justlog(&client, &channel_lower, &username_lower),
-    )
-    .await
-    .unwrap_or_else(|_| Err("justlog: timed out".to_string()));
+    let result = tokio::time::timeout(cap, fetch_from_justlog(&client, &channel_lower, &username_lower))
+        .await
+        .unwrap_or_else(|_| Err("justlog: timed out".to_string()));
 
     eprintln!(
         "[chatlogs/deep] channel={} user={} -> justlog={}\n  justlog_err=[{}]",
@@ -542,8 +519,8 @@ struct InstanceCacheEntry {
 const INSTANCE_TTL_OK: std::time::Duration = std::time::Duration::from_secs(60 * 60);
 const INSTANCE_TTL_MISS: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
-fn instance_cache(
-) -> &'static std::sync::Mutex<std::collections::HashMap<String, InstanceCacheEntry>> {
+fn instance_cache() -> &'static std::sync::Mutex<std::collections::HashMap<String, InstanceCacheEntry>>
+{
     static CACHE: std::sync::OnceLock<
         std::sync::Mutex<std::collections::HashMap<String, InstanceCacheEntry>>,
     > = std::sync::OnceLock::new();
@@ -719,11 +696,7 @@ async fn fetch_justlog_at(
         return Ok(Vec::new());
     }
     if !response.status().is_success() {
-        return Err(format!(
-            "Justlog API error ({}): {}",
-            base,
-            response.status()
-        ));
+        return Err(format!("Justlog API error ({}): {}", base, response.status()));
     }
 
     let parsed: JustlogResponse = response

@@ -85,13 +85,7 @@ impl ChatProvider for KickProvider {
             // connect for this slug doesn't spin a second resolver webview.
             let mut consumers = HashSet::new();
             consumers.insert(window.to_string());
-            conns.insert(
-                slug.clone(),
-                Connection {
-                    consumers,
-                    task: None,
-                },
-            );
+            conns.insert(slug.clone(), Connection { consumers, task: None });
         }
 
         // Count this pending connection as a bridge user IMMEDIATELY - before the
@@ -177,9 +171,7 @@ impl ChatProvider for KickProvider {
         // The official chat API addresses the channel by its numeric broadcaster
         // user id, which we captured into the channel metadata during resolve.
         let Some(broadcaster_user_id) = channel_meta(&slug).and_then(|m| m.user_id) else {
-            return Ok(drop(
-                "Kick channel isn't resolved yet — try again in a moment",
-            ));
+            return Ok(drop("Kick channel isn't resolved yet — try again in a moment"));
         };
 
         let mut body = json!({
@@ -367,19 +359,16 @@ pub fn channel_meta(slug: &str) -> Option<KickChannelMeta> {
         .and_then(|m| m.get(&slug.to_lowercase()).cloned())
 }
 
-static PENDING: OnceLock<Mutex<HashMap<String, oneshot::Sender<ResolvedChannel>>>> =
-    OnceLock::new();
+static PENDING: OnceLock<Mutex<HashMap<String, oneshot::Sender<ResolvedChannel>>>> = OnceLock::new();
 // Native emotes are reported AFTER the channel chrome (separate, slower fetch), so
 // they ride their own pending channel keyed by the same resolver label.
-static PENDING_EMOTES: OnceLock<
-    Mutex<HashMap<String, oneshot::Sender<Vec<kick_emotes::KickNativeEmoteEntry>>>>,
-> = OnceLock::new();
+static PENDING_EMOTES: OnceLock<Mutex<HashMap<String, oneshot::Sender<Vec<kick_emotes::KickNativeEmoteEntry>>>>> =
+    OnceLock::new();
 static RESOLVE_SEQ: AtomicU64 = AtomicU64::new(0);
 // Per-channel custom subscriber badges (months -> image src) captured from the
 // channel API during resolution, keyed by slug. std Mutex for sync reads from
 // the (sync) message parser.
-static SUB_BADGES: OnceLock<std::sync::Mutex<HashMap<String, Vec<(u32, String)>>>> =
-    OnceLock::new();
+static SUB_BADGES: OnceLock<std::sync::Mutex<HashMap<String, Vec<(u32, String)>>>> = OnceLock::new();
 
 fn pending() -> &'static Mutex<HashMap<String, oneshot::Sender<ResolvedChannel>>> {
     PENDING.get_or_init(|| Mutex::new(HashMap::new()))
@@ -415,10 +404,7 @@ pub async fn resolve_pending(
 /// Called by `report_kick_emotes` when the (slower) native-emote fetch completes
 /// in the resolver webview. Delivers them to the still-open resolver task, which
 /// stores them and closes the webview.
-pub async fn resolve_emotes_pending(
-    label: &str,
-    native_emotes: Vec<kick_emotes::KickNativeEmoteEntry>,
-) {
+pub async fn resolve_emotes_pending(label: &str, native_emotes: Vec<kick_emotes::KickNativeEmoteEntry>) {
     if let Some(tx) = pending_emotes().lock().await.remove(label) {
         let _ = tx.send(native_emotes);
     }
@@ -453,10 +439,7 @@ async fn resolve_via_webview(slug: &str) -> Result<u64> {
     let (tx, rx) = oneshot::channel::<ResolvedChannel>();
     let (tx_emotes, rx_emotes) = oneshot::channel::<Vec<kick_emotes::KickNativeEmoteEntry>>();
     pending().lock().await.insert(label.clone(), tx);
-    pending_emotes()
-        .lock()
-        .await
-        .insert(label.clone(), tx_emotes);
+    pending_emotes().lock().await.insert(label.clone(), tx_emotes);
 
     let profile = kick_resolve_profile_dir(&app);
     let script = kick_resolve_script(&slug_lc, &label);
@@ -666,11 +649,7 @@ async fn run_connection(slug: String, chatroom_id: u64) {
     }
 }
 
-async fn connect_and_stream(
-    chatroom_id: u64,
-    channel_id: Option<u64>,
-    channel_key: &str,
-) -> Result<()> {
+async fn connect_and_stream(chatroom_id: u64, channel_id: Option<u64>, channel_key: &str) -> Result<()> {
     let (ws, _) = connect_async(PUSHER_URL).await?;
     let (mut write, mut read) = ws.split();
 
@@ -843,14 +822,12 @@ fn parse_chat_message(frame: &Value, channel_key: &str) -> Option<ChatMessage> {
                 .and_then(|u| u.as_str())
                 .unwrap_or("")
                 .to_string();
-            let parent_id = m
-                .pointer("/original_sender/id")
-                .map_or_else(String::new, |i| {
-                    i.as_u64()
-                        .map(|n| n.to_string())
-                        .or_else(|| i.as_str().map(String::from))
-                        .unwrap_or_default()
-                });
+            let parent_id = m.pointer("/original_sender/id").map_or_else(String::new, |i| {
+                i.as_u64()
+                    .map(|n| n.to_string())
+                    .or_else(|| i.as_str().map(String::from))
+                    .unwrap_or_default()
+            });
             ReplyInfo {
                 parent_msg_id: m
                     .pointer("/original_message/id")
@@ -1003,10 +980,8 @@ fn parse_subscription(frame: &Value, channel_key: &str) -> Option<ChatMessage> {
     let mut msg = build_event_message(channel_key, &username, msg_id, &system_msg);
     // Carry the cumulative months in the Twitch tag vocabulary so the activity feed's
     // generic producer surfaces the resub duration (like Twitch), not just "resubbed".
-    msg.tags.insert(
-        "msg-param-cumulative-months".to_string(),
-        months.to_string(),
-    );
+    msg.tags
+        .insert("msg-param-cumulative-months".to_string(), months.to_string());
     Some(msg)
 }
 
@@ -1041,12 +1016,7 @@ fn parse_gifted_subs(frame: &Value, channel_key: &str) -> Option<ChatMessage> {
             format!("{} gifted {} subscriptions!", gifter, recipients.len()),
         )
     };
-    Some(build_event_message(
-        channel_key,
-        &gifter,
-        msg_id,
-        &system_msg,
-    ))
+    Some(build_event_message(channel_key, &gifter, msg_id, &system_msg))
 }
 
 /// Decode `App\Events\MessageDeletedEvent` into a `CLEARMSG` control frame (a
@@ -1113,11 +1083,13 @@ fn build_clearchat(frame: &Value, channel_key: &str) -> Option<String> {
         .and_then(|x| x.as_bool())
         .unwrap_or(false);
     let user = data.get("user");
-    let target_user_id = user.and_then(|u| u.get("id")).and_then(|x| {
-        x.as_u64()
-            .map(|n| n.to_string())
-            .or_else(|| x.as_str().map(String::from))
-    })?;
+    let target_user_id = user
+        .and_then(|u| u.get("id"))
+        .and_then(|x| {
+            x.as_u64()
+                .map(|n| n.to_string())
+                .or_else(|| x.as_str().map(String::from))
+        })?;
     let target_user = user
         .and_then(|u| u.get("username").or_else(|| u.get("slug")))
         .and_then(|x| x.as_str())
@@ -1305,9 +1277,7 @@ fn parse_badges(identity: Option<&Value>, slug: &str) -> Vec<Badge> {
                 sort,
                 Badge {
                     name: name.to_string(),
-                    version: level
-                        .map(|n| n.to_string())
-                        .unwrap_or_else(|| "1".to_string()),
+                    version: level.map(|n| n.to_string()).unwrap_or_else(|| "1".to_string()),
                     image_url_1x: Some(img.to_string()),
                     image_url_2x: None,
                     image_url_4x: None,
@@ -1431,9 +1401,7 @@ mod tests {
         assert_eq!(plain, "hi KEKW there");
         assert_eq!(segs.len(), 3);
         match &segs[1] {
-            MessageSegment::Emote {
-                emote_url, content, ..
-            } => {
+            MessageSegment::Emote { emote_url, content, .. } => {
                 assert!(emote_url.contains("39261"));
                 assert_eq!(content, "KEKW");
             }

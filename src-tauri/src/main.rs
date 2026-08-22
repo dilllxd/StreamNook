@@ -32,9 +32,11 @@ use commands::{
     cosmetics_cache::*, diagnostic_logging::*, discord::*, drops::*, emoji::*, emote_prefetch::*,
     emotes::*, eventsub::*, ffz::*, hype_train::*, identity::*, itzon::*, justlog::*, layout::*,
     link_preview::*, logs::*, mod_log_storage::*, modroom::*, multi_nook::*, plugins::*,
-    profile_cache::*, resub::*, screen_capture::*, session::*, settings::*, seventv::*,
-    seventv_cosmetics::*, seventv_cosmetics_fetch::*, song_id::*, streaming::*, subscriptions::*,
-    twitch::*, universal_cache::*, user_profile::*, watch_streak::*, whisper_storage::*,
+    profile_cache::*,
+    resub::*, screen_capture::*, session::*, settings::*, seventv::*, seventv_cosmetics::*,
+    seventv_cosmetics_fetch::*, song_id::*, streaming::*, subscriptions::*, twitch::*,
+    universal_cache::*,
+    user_profile::*, watch_streak::*, whisper_storage::*,
 };
 use log::{debug, error};
 use models::settings::{AppState, CloseToTrayMode, Settings};
@@ -134,12 +136,12 @@ fn show_main_window(app: &tauri::AppHandle) {
     };
     match tauri::WebviewWindowBuilder::new(app, "main", app_url)
         .title("StreamNook")
-        .inner_size(1600.0, 1000.0)
-        .min_inner_size(800.0, 600.0)
-        .center()
-        .resizable(true)
-        .decorations(false)
-        .build()
+    .inner_size(1600.0, 1000.0)
+    .min_inner_size(800.0, 600.0)
+    .center()
+    .resizable(true)
+    .decorations(false)
+    .build()
     {
         Ok(win) => {
             debug!("[Main] Recreated main window on demand");

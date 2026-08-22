@@ -18,6 +18,8 @@ import PlayerStatsOverlay from './PlayerStatsOverlay';
 import { Tooltip } from './ui/Tooltip';
 import { TwitchVerifiedMark } from './ui/TwitchGlyph';
 import { ProviderLogo } from './ProviderLogo';
+import { ItzonAvatar } from './ItzonAvatar';
+import { itzonLatencyProfile } from '../services/itzon';
 import { registerPlayerControls, type PlayerControls } from '../keybindings';
 import { qualitiesEquivalent } from '../utils/quality';
 
@@ -796,19 +798,30 @@ const VideoPlayer = () => {
     } else if (Hls.isSupported()) {
       Logger.debug('[HLS] HLS.js is supported, creating player...');
 
-      // Resolve the Twitch relay's parts-based LL-HLS state before constructing
-      // hls.js. itzon is handled separately because its upstream playlist already
-      // carries native LL-HLS parts and intentionally bypasses that relay origin.
+      // Resolve the delivery path before constructing hls.js; lowLatencyMode
+      // cannot be changed afterward.
       const isItzonChannel = useAppStore.getState().currentStream?.provider === 'itzon';
       let relayLowLatencyActive = false;
       try {
         relayLowLatencyActive = await invoke<boolean>('get_stream_low_latency');
       } catch { /* command unavailable / stream gone */ }
-      // itzon's upstream is already native LL-HLS (#EXT-X-PART with blocking
-      // reload), so it does not use StreamNook's Twitch-oriented LL origin. It
-      // still must run hls.js in low-latency mode or the player ignores 200ms
-      // parts, waits for complete 2s segments, and can drain its forward buffer.
-      const isLowLatencyChannel = relayLowLatencyActive || isItzonChannel;
+      let itzonProfile = itzonLatencyProfile(null, false);
+      if (isItzonChannel) {
+        try {
+          const startedAt = performance.now();
+          const response = await fetch(streamUrl, { cache: 'no-store' });
+          const playlist = await response.text();
+          itzonProfile = itzonLatencyProfile(
+            performance.now() - startedAt,
+            response.ok && playlist.includes('ll=1'),
+          );
+        } catch {
+          // An unmeasured connection uses itzon's conservative midrange tier.
+        }
+      }
+      const isLowLatencyChannel = relayLowLatencyActive || (
+        isItzonChannel && itzonProfile.lowLatencyMode
+      );
       // Superseded while awaiting the probe: a newer invocation (or teardown)
       // owns the element now. Constructing would create the zombie player.
       if (seq !== createSeqRef.current) {
@@ -816,7 +829,7 @@ const VideoPlayer = () => {
         return;
       }
       Logger.debug(
-        `[HLS] low-latency parts=${isLowLatencyChannel} (relay=${relayLowLatencyActive}, itzon=${isItzonChannel})`,
+        `[HLS] low-latency parts=${isLowLatencyChannel} (relay=${relayLowLatencyActive}, itzon=${isItzonChannel ? itzonProfile.tier : 'no'})`,
       );
 
       // The viewer's preferred behind-live target (displayed seconds), converted to the
@@ -836,7 +849,7 @@ const VideoPlayer = () => {
         : currentStream?.user_login;
       const liveSyncDuration = learnedLLCushion(
         latencyChannelKey,
-        isItzonChannel ? Math.max(5, Math.min(10, llTargetRaw)) : llTargetRaw,
+        isItzonChannel ? itzonProfile.liveSyncDuration : llTargetRaw,
       );
 
       // Create HLS.js instance with optimized settings
@@ -890,7 +903,7 @@ const VideoPlayer = () => {
           },
         } : false,
         enableWorker: true,
-        lowLatencyMode: isLowLatencyChannel, // True for the relay's part origin or itzon's native part playlist; false for ordinary whole-segment sources.
+        lowLatencyMode: isLowLatencyChannel,
         startFragPrefetch: false, // Disabled: prefetching double-buffers massive TS chunks in V8 heap
         backBufferLength: 30, // Keep 30 seconds of back buffer
         maxBufferLength: currentSettings.max_buffer_length || 30, // Buffer ahead
@@ -908,10 +921,9 @@ const VideoPlayer = () => {
         // settles where it's smooth. The Low Latency engine (when on) is what lets the
         // lowest gaps stay smooth on supported channels; without it, low gaps self-limit.
         liveSyncDuration,
-        // itzon's own fallback player keeps a much tighter live window. Letting
-        // its part-aware playlist drift for 60s makes a recovery more disruptive
-        // and is unnecessary with a ~60s DVR manifest.
-        liveMaxLatencyDuration: isItzonChannel ? Math.max(12, liveSyncDuration + 2) : 60,
+        liveMaxLatencyDuration: isItzonChannel
+          ? Math.max(itzonProfile.liveMaxLatencyDuration, liveSyncDuration + 2)
+          : 60,
         // 1 = hls.js's latency controller is fully inert on EVERY path (its rate is
         // quantized to 0.05 steps — dist ~32618 — and each abrupt step is audible
         // through the pitch corrector as a pop/warble, obvious on music, and reads
@@ -942,7 +954,7 @@ const VideoPlayer = () => {
       // the overlay subtracts a fixed calibration so the number is Twitch-comparable);
       // 'plain' = the stable whole-segment path (hls.latency shown directly).
       (hls as unknown as { __snPathHint?: string }).__snPathHint = isItzonChannel
-        ? 'itzon-ll'
+        ? (itzonProfile.lowLatencyMode ? 'itzon-ll' : 'plain')
         : relayLowLatencyActive
           ? 'll'
           : 'plain';
@@ -2452,7 +2464,16 @@ const VideoPlayer = () => {
                   live ring is gated on media type — this overlay also serves
                   VODs, clips, and offline chat, where it would be a lie. */}
               <div className="flex items-center gap-2 min-w-0">
-                {currentStream.profile_image_url ? (
+                {currentProvider === 'itzon' ? (
+                  <ItzonAvatar
+                    src={currentStream.profile_image_url}
+                    name={currentStream.user_name || currentStream.user_login}
+                    draggable={false}
+                    className={`w-7 h-7 rounded-full object-cover shrink-0 ${
+                      currentMediaType === 'live' ? 'ring-2 ring-live/80' : ''
+                    }`}
+                  />
+                ) : currentStream.profile_image_url ? (
                   <img
                     src={currentStream.profile_image_url}
                     alt=""

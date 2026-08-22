@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useDroppable, useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { usemultiNookStore } from '../../stores/multiNookStore';
@@ -50,9 +50,6 @@ const MultiNookToolbar: React.FC<MultiNookToolbarProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
-  // Channels already in the grid, excluded from every list so you can't add a
-  // duplicate. Left unmemoized: the React Compiler auto-memoizes it, and a manual
-  // useMemo here can't be preserved once it's passed into the search hook.
   const existingLogins = new Set(
     slots
       .filter((slot) => (slot.provider ?? 'twitch') === selectedProvider)
@@ -101,18 +98,16 @@ const MultiNookToolbar: React.FC<MultiNookToolbarProps> = ({
     }
   }, []);
 
-  const itzonItems = useMemo(() => {
-    const normalizedQuery = searchInput.trim().toLowerCase();
-    return itzonStreams.filter((item) => {
-      if (existingLogins.has(item.login)) return false;
-      if (!normalizedQuery) return true;
-      return (
-        item.login.includes(normalizedQuery) ||
-        item.displayName.toLowerCase().includes(normalizedQuery) ||
-        (item.gameName || '').toLowerCase().includes(normalizedQuery)
-      );
-    });
-  }, [existingLogins, itzonStreams, searchInput]);
+  const normalizedItzonQuery = searchInput.trim().toLowerCase();
+  const itzonItems = itzonStreams.filter((item) => {
+    if (existingLogins.has(item.login)) return false;
+    if (!normalizedItzonQuery) return true;
+    return (
+      item.login.includes(normalizedItzonQuery) ||
+      item.displayName.toLowerCase().includes(normalizedItzonQuery) ||
+      (item.gameName || '').toLowerCase().includes(normalizedItzonQuery)
+    );
+  });
 
   const visibleItems = selectedProvider === 'itzon' ? itzonItems : twitchVisibleItems;
   const isSearching = selectedProvider === 'itzon' ? isItzonLoading : isTwitchSearching;
@@ -121,13 +116,11 @@ const MultiNookToolbar: React.FC<MultiNookToolbarProps> = ({
   // current the moment the panel appears.
   useEffect(() => {
     if (isSearchOpen) {
-      if (selectedProvider === 'twitch') refreshFollowing();
-      else void refreshItzon();
       // Small delay for the expand animation to start
       const t = setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 80);
       return () => clearTimeout(t);
     }
-  }, [isSearchOpen, selectedProvider, refreshFollowing, refreshItzon]);
+  }, [isSearchOpen]);
 
   const closeSearch = () => {
     setIsSearchOpen(false);
@@ -324,7 +317,13 @@ const MultiNookToolbar: React.FC<MultiNookToolbarProps> = ({
             <Tooltip content="Add Stream" delay={200} side="bottom">
               <button
                 onClick={() => {
-                  if (slots.length < 25) setIsSearchOpen((open) => !open);
+                  if (slots.length >= 25) return;
+                  const nextOpen = !isSearchOpen;
+                  setIsSearchOpen(nextOpen);
+                  if (nextOpen) {
+                    if (selectedProvider === 'twitch') void refreshFollowing();
+                    else void refreshItzon();
+                  }
                 }}
                 disabled={slots.length >= 25 || isAdding}
                 aria-expanded={isSearchOpen}
@@ -358,6 +357,8 @@ const MultiNookToolbar: React.FC<MultiNookToolbarProps> = ({
                             setSelectedProvider(provider);
                             setSearchInput('');
                             setHighlightIndex(0);
+                            if (provider === 'twitch') void refreshFollowing();
+                            else void refreshItzon();
                           }}
                           className={`h-9 flex items-center justify-center gap-2 text-xs font-semibold transition-colors ${
                             active ? 'bg-white/[0.055] text-textPrimary' : 'text-textMuted hover:text-textPrimary hover:bg-white/[0.025]'

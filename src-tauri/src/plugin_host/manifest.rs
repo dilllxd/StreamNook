@@ -193,10 +193,7 @@ impl PluginManifest {
                 })
         };
         if !id_ok {
-            bail!(
-                "plugin id '{}' is not a valid reverse-DNS identifier",
-                self.id
-            );
+            bail!("plugin id '{}' is not a valid reverse-DNS identifier", self.id);
         }
         if self.name.is_empty() || self.name.chars().count() > 40 {
             bail!("plugin name must be 1 to 40 characters");
@@ -230,9 +227,7 @@ impl PluginManifest {
                     bail!("a ui plugin's [capabilities] lists must be empty (see UI_PLUGINS.md)");
                 }
                 if self.runtime.ui_entry.is_some() {
-                    bail!(
-                        "a ui plugin's module is `entry`; `ui_entry` is only for process plugins"
-                    );
+                    bail!("a ui plugin's module is `entry`; `ui_entry` is only for process plugins");
                 }
             }
             "wasm" => bail!("runtime.kind 'wasm' is reserved and not supported by this host"),

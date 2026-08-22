@@ -30,8 +30,7 @@ const TOKEN_URL: &str = "https://id.kick.com/oauth/token";
 // Exactly the scopes the throwaway probe confirmed work for token exchange + send.
 // (events:subscribe is for the future Activity-feed work; its scope string is
 // unverified, and an unknown scope makes the whole authorize page bounce.)
-const SCOPES: &str =
-    "user:read channel:read chat:write moderation:ban moderation:chat_message:manage";
+const SCOPES: &str = "user:read channel:read chat:write moderation:ban moderation:chat_message:manage";
 // Persisted so a Kick login survives app restarts (the token was in-memory only
 // before). Keyring is primary; an obfuscated file is the fallback for machines
 // where the OS keyring is unavailable.
@@ -219,12 +218,9 @@ pub async fn connect() -> Result<()> {
     let state = rand_b64(16);
 
     // Bind the loopback BEFORE opening the browser so the redirect can't race us.
-    let listener = TcpListener::bind("127.0.0.1:3000").await.map_err(|e| {
-        anyhow!(
-            "couldn't bind localhost:3000 for the Kick login redirect: {}",
-            e
-        )
-    })?;
+    let listener = TcpListener::bind("127.0.0.1:3000")
+        .await
+        .map_err(|e| anyhow!("couldn't bind localhost:3000 for the Kick login redirect: {}", e))?;
 
     let auth_url = format!(
         "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&code_challenge={}&code_challenge_method=S256&state={}",
@@ -261,11 +257,7 @@ pub async fn connect() -> Result<()> {
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(anyhow!(
-            "Kick token exchange failed (HTTP {}): {}",
-            status,
-            body
-        ));
+        return Err(anyhow!("Kick token exchange failed (HTTP {}): {}", status, body));
     }
     let tr: TokenResponse = resp.json().await?;
     let username = fetch_username(&tr.access_token).await;
@@ -297,9 +289,7 @@ async fn accept_redirect(listener: TcpListener) -> Result<(String, String)> {
         if !first_line.contains("/callback") {
             // favicon / preflight / stray request — ack and keep waiting.
             let _ = stream
-                .write_all(
-                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                )
+                .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
                 .await;
             continue;
         }
@@ -314,14 +304,10 @@ async fn accept_redirect(listener: TcpListener) -> Result<(String, String)> {
             let mut kv = pair.splitn(2, '=');
             match (kv.next(), kv.next()) {
                 (Some("code"), Some(v)) => {
-                    code = urlencoding::decode(v)
-                        .map(|c| c.into_owned())
-                        .unwrap_or_else(|_| v.to_string())
+                    code = urlencoding::decode(v).map(|c| c.into_owned()).unwrap_or_else(|_| v.to_string())
                 }
                 (Some("state"), Some(v)) => {
-                    state = urlencoding::decode(v)
-                        .map(|c| c.into_owned())
-                        .unwrap_or_else(|_| v.to_string())
+                    state = urlencoding::decode(v).map(|c| c.into_owned()).unwrap_or_else(|_| v.to_string())
                 }
                 _ => {}
             }

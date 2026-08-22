@@ -96,9 +96,7 @@ fn ensure_flush_task() {
                     tokio::task::spawn_blocking(move || save_manifest_to_disk(&snapshot)).await;
                 if !matches!(flushed, Ok(Ok(()))) {
                     if let Ok(Err(e)) = flushed {
-                        debug!(
-                            "[UniversalCache] Debounced manifest flush failed (will retry): {e}"
-                        );
+                        debug!("[UniversalCache] Debounced manifest flush failed (will retry): {e}");
                     }
                     MANIFEST_DIRTY.store(true, Ordering::Release);
                 }

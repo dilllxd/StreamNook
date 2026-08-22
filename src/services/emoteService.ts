@@ -33,6 +33,12 @@ export interface EmoteSet {
   kick: Emote[];
 }
 
+type BackendEmote = Emote & {
+  is_zero_width?: boolean;
+  modifier_flags?: number;
+  ffz_sub_only?: boolean;
+};
+
 // Module-level registry of cached emote files (cacheKey -> localPath).
 // For 7TV the key is `${id}@${tier}` (see emoteCacheKey); other providers key
 // by bare id since they have a single canonical URL.
@@ -475,7 +481,7 @@ export async function fetchKickChannelEmotes(slug: string): Promise<EmoteSet> {
     Logger.info(
       `[EmoteService] Kick emotes for "${slug}": ${emoteSet.kick?.length ?? 0} native, ${emoteSet['7tv']?.length ?? 0} 7TV`,
     );
-    const enhance = (emotes: any[]) =>
+    const enhance = (emotes: BackendEmote[]) =>
       (emotes ?? []).map((emote) => {
         const localPath = cachedEmoteFiles.get(emoteCacheKey(emote.id, emote.provider));
         const zeroWidth = emote.is_zero_width !== undefined ? emote.is_zero_width : emote.isZeroWidth;
@@ -507,7 +513,7 @@ export async function fetchItzonChannelEmotes(slug: string): Promise<EmoteSet> {
   await ensureEmoteFileCache();
   try {
     const emoteSet = await invoke<EmoteSet>('get_itzon_channel_emotes', { slug });
-    const enhance = (emotes: any[]) =>
+    const enhance = (emotes: BackendEmote[]) =>
       (emotes ?? []).map((emote) => {
         const localPath = cachedEmoteFiles.get(emoteCacheKey(emote.id, emote.provider));
         return {

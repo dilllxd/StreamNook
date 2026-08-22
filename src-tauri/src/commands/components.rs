@@ -654,8 +654,9 @@ pub async fn restart_to_apply_update(app_handle: tauri::AppHandle) -> Result<(),
         // the window had. Flush geometry ourselves first, matching the flags the
         // plugin is built with (position/size/maximized only).
         use tauri_plugin_window_state::{AppHandleExt, StateFlags};
-        let _ = app_handle
-            .save_window_state(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED);
+        let _ = app_handle.save_window_state(
+            StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED,
+        );
         std::process::exit(0);
     }
 

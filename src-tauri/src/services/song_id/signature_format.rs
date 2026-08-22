@@ -141,4 +141,5 @@ impl DecodedSignature {
             general_purpose::STANDARD.encode(self.encode_to_binary()?)
         ))
     }
+
 }

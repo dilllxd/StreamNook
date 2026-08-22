@@ -586,10 +586,7 @@ export function BlendedChatPane({ channels }: { channels: BlendedChannel[] }) {
     [channels],
   );
   useEffect(() => {
-    if (itzonChannels.length === 0) {
-      setItzonCapabilities({});
-      return;
-    }
+    if (itzonChannels.length === 0) return;
     let active = true;
     const check = async () => {
       const entries = await Promise.all(

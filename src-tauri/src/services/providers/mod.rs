@@ -92,7 +92,8 @@ pub trait ChatProvider: Send + Sync {
     async fn disconnect(&self, channel: &str, window: &str) -> Result<()>;
     /// Send `text` to `channel` as the connected account, if any. `reply_to` is the
     /// platform message id being replied to (None for a normal message).
-    async fn send(&self, channel: &str, text: &str, reply_to: Option<&str>) -> Result<SendOutcome>;
+    async fn send(&self, channel: &str, text: &str, reply_to: Option<&str>)
+        -> Result<SendOutcome>;
     /// Whether sending to `channel` is currently possible.
     async fn send_capability(&self, channel: &str) -> SendCapability;
 }

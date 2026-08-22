@@ -642,10 +642,12 @@ impl IrcService {
     ) -> std::result::Result<&'static str, SessionError> {
         debug!("[IRC Chat] Connecting to Twitch IRC...");
 
-        let stream =
-            tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect((IRC_SERVER, IRC_PORT)))
-                .await
-                .map_err(|_| SessionError::Transient(anyhow::anyhow!("connect timed out")))??;
+        let stream = tokio::time::timeout(
+            CONNECT_TIMEOUT,
+            TcpStream::connect((IRC_SERVER, IRC_PORT)),
+        )
+        .await
+        .map_err(|_| SessionError::Transient(anyhow::anyhow!("connect timed out")))??;
         let (reader, writer) = tokio::io::split(stream);
         let mut reader = BufReader::new(reader);
         // The global IRC_WRITER is published only after auth succeeds, so
@@ -1442,10 +1444,7 @@ impl IrcService {
         let json: serde_json::Value = match response.json().await {
             Ok(j) => j,
             Err(e) => {
-                error!(
-                    "[IRC Chat] Cheermote response for {} unreadable: {}",
-                    key, e
-                );
+                error!("[IRC Chat] Cheermote response for {} unreadable: {}", key, e);
                 return;
             }
         };
@@ -1458,10 +1457,7 @@ impl IrcService {
             set.len(),
             key
         );
-        get_channel_cheermotes()
-            .lock()
-            .await
-            .insert(key, Arc::new(set));
+        get_channel_cheermotes().lock().await.insert(key, Arc::new(set));
     }
 
     /// Convert a raw Helix `bits/cheermotes` response into the parse map.
@@ -1488,15 +1484,10 @@ impl IrcService {
                     let min_bits = t.get("min_bits").and_then(|m| m.as_u64())? as u32;
                     let color = t.get("color").and_then(|c| c.as_str())?.to_string();
                     let dark = t.get("images")?.get("dark")?;
-                    let url = [
-                        ("animated", "2"),
-                        ("animated", "1"),
-                        ("static", "2"),
-                        ("static", "1"),
-                    ]
-                    .iter()
-                    .find_map(|(kind, size)| dark.get(kind)?.get(size)?.as_str())?
-                    .to_string();
+                    let url = [("animated", "2"), ("animated", "1"), ("static", "2"), ("static", "1")]
+                        .iter()
+                        .find_map(|(kind, size)| dark.get(kind)?.get(size)?.as_str())?
+                        .to_string();
                     Some(CheermoteTier {
                         min_bits,
                         color,
@@ -2573,9 +2564,7 @@ impl IrcService {
             .filter(|&&prefix| {
                 word_lower.len() > prefix.len()
                     && word_lower.starts_with(prefix)
-                    && word_lower[prefix.len()..]
-                        .chars()
-                        .all(|c| c.is_ascii_digit())
+                    && word_lower[prefix.len()..].chars().all(|c| c.is_ascii_digit())
             })
             .max_by_key(|prefix| prefix.len())?;
 
@@ -3360,9 +3349,7 @@ mod tests {
 
     #[test]
     fn reconnect_delay_backs_off_and_caps() {
-        let secs: Vec<u64> = (1..=8)
-            .map(|n| reconnect_delay(n, false).as_secs())
-            .collect();
+        let secs: Vec<u64> = (1..=8).map(|n| reconnect_delay(n, false).as_secs()).collect();
         assert_eq!(secs, vec![2, 4, 8, 16, 32, 60, 60, 60]);
         assert_eq!(reconnect_delay(0, false).as_secs(), 2);
         assert_eq!(reconnect_delay(1, true).as_secs(), 300);
@@ -3493,10 +3480,7 @@ mod tests {
         let tiers = set.get("mathox1cheer").expect("prefix lowercased");
         assert_eq!(tiers.len(), 2);
         assert_eq!(tiers[0].min_bits, 1, "tiers sorted ascending");
-        assert_eq!(
-            tiers[0].url, "https://cdn.test/m/1/2.png",
-            "static fallback"
-        );
+        assert_eq!(tiers[0].url, "https://cdn.test/m/1/2.png", "static fallback");
         assert_eq!(tiers[1].url, "https://cdn.test/m/100/2.gif", "2x animated");
         assert!(!set.contains_key("noart"), "art-less prefix dropped");
     }

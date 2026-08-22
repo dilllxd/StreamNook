@@ -561,9 +561,9 @@ impl AccountStore {
 
         match fs::write(&marker, FORCE_REAUTH_TOKEN) {
             Ok(_) => debug!("[accounts] force-reauth applied; marker written"),
-            Err(e) => {
-                warn!("[accounts] force-reauth: marker write failed; will retry next launch: {e}")
-            }
+            Err(e) => warn!(
+                "[accounts] force-reauth: marker write failed; will retry next launch: {e}"
+            ),
         }
         true
     }

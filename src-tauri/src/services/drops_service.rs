@@ -180,11 +180,7 @@ fn load_lifetime_points_collected() -> i64 {
             .ok()
             // Prefer the current key; fall back to the legacy key so an existing
             // stats file keeps its cumulative total across the rename.
-            .and_then(|v| {
-                v["points_collected"]
-                    .as_i64()
-                    .or_else(|| v["points_mined"].as_i64())
-            })
+            .and_then(|v| v["points_collected"].as_i64().or_else(|| v["points_mined"].as_i64()))
             .unwrap_or(0),
         Err(_) => 0,
     }
@@ -284,8 +280,7 @@ impl DropsService {
         };
 
         // Use the exact same GQL operation as the Twitch web client
-        let response = self
-            .client
+        let response = self.client
             .post("https://gql.twitch.tv/gql")
             .headers(self.create_gql_headers(&token))
             .json(&serde_json::json!({
@@ -1122,9 +1117,7 @@ impl DropsService {
                 continue;
             };
             for drop in drops {
-                let Some(drop_id) = drop["id"].as_str() else {
-                    continue;
-                };
+                let Some(drop_id) = drop["id"].as_str() else { continue };
                 let self_data = &drop["self"];
                 if self_data.is_null() {
                     continue;
@@ -1142,7 +1135,9 @@ impl DropsService {
                             .unwrap_or(0) as i32,
                         is_claimed: self_data["isClaimed"].as_bool().unwrap_or(false),
                         last_updated: Utc::now(),
-                        drop_instance_id: self_data["dropInstanceID"].as_str().map(String::from),
+                        drop_instance_id: self_data["dropInstanceID"]
+                            .as_str()
+                            .map(String::from),
                     },
                 );
             }

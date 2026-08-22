@@ -50,6 +50,47 @@ export interface ItzonChannel {
 export const itzonAvatarUrl = (username: string): string =>
   `https://itzon.tv/api/live/profile/${encodeURIComponent(username.toLowerCase())}/avatar`;
 
+export type ItzonLatencyTier = 'near' | 'mid' | 'far';
+
+export interface ItzonLatencyProfile {
+  tier: ItzonLatencyTier;
+  lowLatencyMode: boolean;
+  liveSyncDuration: number;
+  liveMaxLatencyDuration: number;
+}
+
+/** Match itzon's desktop HLS tier selected from the initial playlist RTT. */
+export function itzonLatencyProfile(
+  rttMs: number | null,
+  originLowLatency: boolean,
+): ItzonLatencyProfile {
+  if (rttMs != null && Number.isFinite(rttMs) && rttMs >= 0) {
+    if (rttMs > 80) {
+      return {
+        tier: 'far',
+        lowLatencyMode: false,
+        liveSyncDuration: 10,
+        liveMaxLatencyDuration: 24,
+      };
+    }
+    if (rttMs <= 40 && originLowLatency) {
+      return {
+        tier: 'near',
+        lowLatencyMode: true,
+        liveSyncDuration: 2.5,
+        liveMaxLatencyDuration: 8,
+      };
+    }
+  }
+
+  return {
+    tier: 'mid',
+    lowLatencyMode: false,
+    liveSyncDuration: 5,
+    liveMaxLatencyDuration: 12,
+  };
+}
+
 /** The deterministic fallback color used by itzon for profiles without an avatar. */
 export function itzonProfileColor(username: string): string {
   let hue = 0;

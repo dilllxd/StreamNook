@@ -408,10 +408,7 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
     'read_only' | 'sendable' | 'needs_login'
   >('needs_login');
   useEffect(() => {
-    if (provider !== 'itzon' || !providerChannel) {
-      setItzonSendCapability('needs_login');
-      return;
-    }
+    if (provider !== 'itzon' || !providerChannel) return;
     let active = true;
     const check = () =>
       invoke<'read_only' | 'sendable' | 'needs_login'>('provider_send_capability', {
@@ -4153,8 +4150,9 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
         <div className="flex-shrink-0 border-t border-borderSubtle" style={{ backgroundColor: 'color-mix(in srgb, var(--color-background) 94%, transparent)' }}>
           <div className="p-2">
             <div className="relative">
-              <EmotePickerPanel
-                open={showEmotePicker}
+                <EmotePickerPanel
+                  key={provider}
+                  open={showEmotePicker}
                 onClose={() => setShowEmotePicker(false)}
                 emotes={emotes}
                 isTwitch={isTwitch}

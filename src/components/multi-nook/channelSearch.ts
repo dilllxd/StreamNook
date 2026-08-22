@@ -141,8 +141,6 @@ export function useChannelSearch(excludeLogins: Set<string>, enabled = true) {
   // Debounced Twitch search, only fires while there's a query; the live list above stays instant.
   useEffect(() => {
     if (!enabled) {
-      setSearchResults([]);
-      setIsSearching(false);
       if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
       return;
     }

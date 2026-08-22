@@ -496,27 +496,52 @@ const Home = () => {
     const activeTab = homeActiveTab;
     const selectedCategory = homeSelectedCategory;
 
-    const refreshItzonDiscovery = useCallback(async (showLoading = true) => {
-        if (showLoading) setItzonDiscoverLoading(true);
-        try {
-            const explore = await getItzonExplore();
-            setItzonDiscoverStreams(explore.streams.map(itzonStreamToTwitchStream));
-            setItzonDiscoverError(null);
-        } catch (error) {
-            const message = typeof error === 'string' ? error : 'Could not load itzon streams';
-            Logger.warn('[itzon] Discover refresh failed:', error);
-            setItzonDiscoverError(message);
-        } finally {
-            if (showLoading) setItzonDiscoverLoading(false);
-        }
+    const applyItzonDiscovery = useCallback((explore: Awaited<ReturnType<typeof getItzonExplore>>) => {
+        setItzonDiscoverStreams(explore.streams.map(itzonStreamToTwitchStream));
+        setItzonDiscoverError(null);
     }, []);
 
+    const reportItzonDiscoveryError = useCallback((error: unknown) => {
+        const message = typeof error === 'string' ? error : 'Could not load itzon streams';
+        Logger.warn('[itzon] Discover refresh failed:', error);
+        setItzonDiscoverError(message);
+    }, []);
+
+    const loadItzonDiscovery = useCallback(async () => {
+        try {
+            applyItzonDiscovery(await getItzonExplore());
+        } catch (error) {
+            reportItzonDiscoveryError(error);
+        }
+    }, [applyItzonDiscovery, reportItzonDiscoveryError]);
+
+    const refreshItzonDiscovery = useCallback(async () => {
+        setItzonDiscoverLoading(true);
+        try {
+            await loadItzonDiscovery();
+        } finally {
+            setItzonDiscoverLoading(false);
+        }
+    }, [loadItzonDiscovery]);
+
     useEffect(() => {
-        if (activeTab === 'following' || activeTab === 'recommended') void refreshItzonDiscovery();
-    }, [activeTab, refreshItzonDiscovery]);
+        if (activeTab !== 'following' && activeTab !== 'recommended') return;
+        let active = true;
+        void getItzonExplore().then(
+            (explore) => {
+                if (active) applyItzonDiscovery(explore);
+            },
+            (error) => {
+                if (active) reportItzonDiscoveryError(error);
+            },
+        );
+        return () => {
+            active = false;
+        };
+    }, [activeTab, applyItzonDiscovery, reportItzonDiscoveryError]);
 
     useVisibleInterval(() => {
-        if (activeTab === 'following' || activeTab === 'recommended') return refreshItzonDiscovery(false);
+        if (activeTab === 'following' || activeTab === 'recommended') return loadItzonDiscovery();
     }, 30_000);
 
     // Wrapper functions to update store state

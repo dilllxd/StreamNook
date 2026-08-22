@@ -184,7 +184,6 @@ jobs:
           TWITCH_WEB_CLIENT_ID: "kimne78kx3ncx6brgo4mv6wki5h1ko"
           KICK_APP_CLIENT_ID: ${{ secrets.KICK_APP_CLIENT_ID }}
           KICK_APP_CLIENT_SECRET: ${{ secrets.KICK_APP_CLIENT_SECRET }}
-          ITZON_OAUTH_CLIENT_ID: ${{ secrets.ITZON_OAUTH_CLIENT_ID }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
       - name: Download StreamNook.exe from previous release (skip_build mode)

@@ -2,13 +2,18 @@
 
 <img src="src-tauri/images/logo.png" alt="StreamNook" width="200" />
 
-# StreamNook
+# StreamNook with itzon
 
-A native Twitch desktop client.
+A native Twitch and itzon desktop client for Windows.
 
 </div>
 
 ---
+
+This fork adds first-class [itzon](https://itzon.tv) discovery, playback,
+authentication, chat, emotes, avatars, and mixed-platform MultiNook/MultiChat
+while retaining StreamNook's Twitch support. It is an independent community
+fork and is not an official itzon client.
 
 You're grinding through your 47th hour of that indie roguelike, talking to yourself about optimal build paths, when you realize *I need human voices*. But opening Twitch in a browser? That's like inviting a resource-hungry elephant to sit on your CPU. Your fans spin up, your frame rate tanks, and suddenly you're choosing between watching streams and actually playing games.
 
@@ -145,11 +150,12 @@ Rust, TypeScript, React, and Tailwind. Packaged as a native desktop app with Tau
 
 ## Install
 
-1. Grab the latest build from the [Releases page](https://github.com/winters27/StreamNook/releases/latest).
+1. Grab the latest preview build from this fork's [Releases page](https://github.com/dilllxd/StreamNook/releases).
 2. Extract and run.
-3. Follow the setup wizard to sign in with Twitch.
+3. Connect Twitch and/or itzon from the app's account controls.
 
-Everything's built in. Nothing else to install.
+Preview builds are unsigned, so Windows may show a SmartScreen warning. Release
+assets include SHA-256 checksums for verification.
 
 ## Credits
 
@@ -158,19 +164,22 @@ Everything's built in. Nothing else to install.
 - [HLS.js](https://github.com/video-dev/hls.js), HLS streaming support.
 - [7TV](https://7tv.app/), extended emotes and cosmetics.
 - [Twitch](https://dev.twitch.tv/), platform and APIs.
+- [itzon](https://itzon.tv/), platform and APIs.
+- [StreamNook](https://github.com/winters27/StreamNook), the upstream project.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). This fork is based on an upstream snapshot published
+as MIT before the upstream project's later licensing change.
 
 ---
 
 <div align="center">
 
 <p>
-  <a href="https://github.com/winters27/StreamNook"><img src="https://img.shields.io/badge/Project-Page-00d9ff?style=for-the-badge&logo=github&logoColor=white&labelColor=1a1a2e" alt="Project page" /></a>
-  <a href="https://github.com/winters27/StreamNook/stargazers"><img src="https://img.shields.io/github/stars/winters27/StreamNook?color=00d9ff&style=for-the-badge&logo=star&logoColor=white&labelColor=1a1a2e" alt="Stars" /></a>
-  <a href="https://github.com/winters27/StreamNook/releases/latest"><img src="https://img.shields.io/github/v/release/winters27/StreamNook?color=ff6b6b&style=for-the-badge&logo=github&logoColor=white&labelColor=1a1a2e" alt="Latest release" /></a>
+  <a href="https://github.com/dilllxd/StreamNook"><img src="https://img.shields.io/badge/Project-Page-00d9ff?style=for-the-badge&logo=github&logoColor=white&labelColor=1a1a2e" alt="Project page" /></a>
+  <a href="https://github.com/dilllxd/StreamNook/stargazers"><img src="https://img.shields.io/github/stars/dilllxd/StreamNook?color=00d9ff&style=for-the-badge&logo=star&logoColor=white&labelColor=1a1a2e" alt="Stars" /></a>
+  <a href="https://github.com/dilllxd/StreamNook/releases"><img src="https://img.shields.io/github/v/release/dilllxd/StreamNook?include_prereleases&color=ff6b6b&style=for-the-badge&logo=github&logoColor=white&labelColor=1a1a2e" alt="Latest release" /></a>
 </p>
 
 <p>
@@ -180,8 +189,7 @@ MIT. See [LICENSE](LICENSE).
 </p>
 
 <p>
-  <a href="https://github.com/winters27/StreamNook/issues"><img src="https://img.shields.io/badge/Issues-ff6b6b?style=for-the-badge&logo=github&logoColor=white&labelColor=1a1a2e" alt="Issues" /></a>
-  <a href="https://github.com/winters27/StreamNook/discussions"><img src="https://img.shields.io/badge/Discussions-4ecdc4?style=for-the-badge&logo=github&logoColor=white&labelColor=1a1a2e" alt="Discussions" /></a>
+  <a href="https://github.com/dilllxd/StreamNook/issues"><img src="https://img.shields.io/badge/Issues-ff6b6b?style=for-the-badge&logo=github&logoColor=white&labelColor=1a1a2e" alt="Issues" /></a>
 </p>
 
 <sub>StreamNook is not affiliated with Twitch Interactive, Inc.</sub>

@@ -16,6 +16,7 @@ scripts/*
 # is versioned with the code that implements it.
 docs/*
 !docs/plugins/
+!docs/itzon.md
 
 # Drops folder (local mining tool) - only root level, not src/components/drops
 /drops/

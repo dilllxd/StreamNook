@@ -1,3 +1,15 @@
+## [8.4.2-itzon.1] - 2026-08-22
+
+### Features
+
+- Added first-class itzon discovery, live playback, authentication, chat,
+  emotes, avatars, following, and mixed-platform MultiNook/MultiChat support.
+
+### Fixes
+
+- Hardened itzon playback and chat recovery for long-running streams.
+- Prevented Discord RPC from blocking application startup.
+
 ## [8.4.2] - 2026-08-16
 
 ## 🔦 Feature Spotlight: The Command Palette

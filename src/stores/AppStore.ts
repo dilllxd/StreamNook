@@ -1118,9 +1118,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       Logger.warn('[Playback] Failed to sync experimental low latency:', e);
     });
 
-    // Discord is optional and its Windows named-pipe handshake is outside the
-    // boot contract. Start it in the background so IPC trouble cannot strand
-    // the app behind the startup overlay.
+    // Discord IPC must not block startup.
     if (settings.discord_rpc_enabled) {
       void invoke('connect_discord').catch((e) => {
         Logger.warn('Could not connect to Discord:', e);

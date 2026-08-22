@@ -1,11 +1,3 @@
-// Connections — the shared account manager used by the main app and MultiChat.
-//
-// Lists every provider with its connection status and a connect/disconnect
-// action. Twitch is the app's native account (managed in the main app), Kick is
-// wired to the OAuth flow, and the rest show as "coming soon" until their adapters
-// ship. This scales as platforms light up — no more per-composer connect chips
-// being the only way in.
-
 import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
@@ -55,8 +47,8 @@ export default function ConnectionsSettings() {
         setItzonConnected(connected);
         setItzonName(connected ? await invoke<string | null>('itzon_account_name') : null);
         setItzonAuthMethod(await invoke<ItzonAuthMethod>('itzon_auth_method'));
-      } catch {
-        /* ignore */
+      } catch (error) {
+        Logger.debug('[itzon] account status unavailable:', error);
       }
       try {
         const c = await invoke<boolean>('kick_is_connected');
@@ -122,7 +114,7 @@ export default function ConnectionsSettings() {
         setItzonAuthMethod(await invoke<ItzonAuthMethod>('itzon_auth_method'));
         await emit('itzon-connection-changed');
       })
-      .catch(() => {});
+      .catch((error) => Logger.warn('[itzon] disconnect failed:', error));
   }, []);
 
   const disconnectKick = useCallback(() => {

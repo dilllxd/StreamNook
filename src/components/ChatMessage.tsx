@@ -48,6 +48,7 @@ import {
   MODIFIER_FILTERS,
   ANIMATED_MODIFIERS,
 } from '../utils/emoteModifiers';
+import { ItzonAvatar } from './ItzonAvatar';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // 7TV cosmetics have complex dynamic structures that vary by API version
@@ -72,42 +73,6 @@ interface EmoteSegment {
   /** Modifier bitmask; present only on modifier emotes (FFZ or BetterTTV) */
   modifierFlags?: number;
 }
-
-const ItzonInlineAvatar = ({
-  src,
-  name,
-  size,
-}: {
-  src?: string;
-  name: string;
-  size: number;
-}) => {
-  const [failedSrc, setFailedSrc] = useState<string | undefined>();
-
-  const className = 'inline-flex rounded-full mr-1.5 align-middle object-cover';
-  if (!src || failedSrc === src) {
-    return (
-      <span
-        aria-hidden="true"
-        className={`${className} items-center justify-center bg-white/10 text-white/75 font-semibold uppercase`}
-        style={{ width: size, height: size, fontSize: Math.max(9, Math.round(size * 0.5)) }}
-      >
-        {name.trim().charAt(0) || '?'}
-      </span>
-    );
-  }
-
-  return (
-    <img
-      src={src}
-      alt=""
-      loading="lazy"
-      className={className}
-      style={{ width: size, height: size }}
-      onError={() => setFailedSrc(src)}
-    />
-  );
-};
 
 // Wrap a rendered emote group in the effect layers its aggregated modifier
 // flags demand. Every wrapper is inline-block: CSS transforms are a no-op on
@@ -3128,10 +3093,15 @@ const ChatMessage = memo(function ChatMessageInner({ message, onUsernameClick, o
           {/* Itzon matches its first-party chat: every row gets an avatar, with
               the chatter's initial when the IRC avatar tag is absent or fails. */}
           {parsed.provider === 'itzon' && (
-            <ItzonInlineAvatar
+            <ItzonAvatar
               src={parsed.tags.get('avatar')}
               name={parsed.tags.get('display-name') || parsed.username}
-              size={Math.round((chatDesign?.font_size ?? 14) * 1.4)}
+              className="inline-flex rounded-full mr-1.5 align-middle object-cover"
+              style={{
+                width: Math.round((chatDesign?.font_size ?? 14) * 1.4),
+                height: Math.round((chatDesign?.font_size ?? 14) * 1.4),
+                fontSize: Math.max(9, Math.round((chatDesign?.font_size ?? 14) * 0.7)),
+              }}
             />
           )}
           {/* YouTube / TikTok native inline avatar — leads the row (before badges)

@@ -82,7 +82,7 @@ export interface Toast {
   createdAt: number;
 }
 
-export type SettingsTab = 'Profile' | 'Interface' | 'Player' | 'Chat' | 'Moderation' | 'Overlay' | 'Theme' | 'Integrations' | 'Plugins' | 'Notifications' | 'Cache' | 'Command Palette' | 'Keybindings' | 'Backup' | 'Support' | "What's New" | 'Analytics';
+export type SettingsTab = 'Profile' | 'Connections' | 'Interface' | 'Player' | 'Chat' | 'Moderation' | 'Overlay' | 'Theme' | 'Integrations' | 'Plugins' | 'Notifications' | 'Cache' | 'Command Palette' | 'Keybindings' | 'Backup' | 'Support' | "What's New" | 'Analytics';
 
 export type HomeTab = 'following' | 'recommended' | 'browse' | 'search' | 'category';
 

@@ -14,6 +14,7 @@ import type { ProviderId } from '../../types/providers';
 import { getItzonExplore, itzonAvatarUrl } from '../../services/itzon';
 import { Logger } from '../../utils/logger';
 import { ProviderLogo } from '../ProviderLogo';
+import { ItzonAvatar } from '../ItzonAvatar';
 import { PROVIDERS } from '../../types/providers';
 
 interface MultiNookToolbarProps {
@@ -601,7 +602,14 @@ const DraggableDockPill: React.FC<{
         {...listeners}
       >
         <div className="flex items-center gap-1.5 opacity-80 group-hover:opacity-100 transition-opacity">
-        {slot.profileImageUrl ? (
+        {(slot.provider ?? 'twitch') === 'itzon' ? (
+          <ItzonAvatar
+            src={slot.profileImageUrl}
+            name={slot.channelName || slot.channelLogin}
+            className="w-5 h-5 rounded-full object-cover shadow-sm bg-black/20"
+            fallbackClassName="text-[9px]"
+          />
+        ) : slot.profileImageUrl ? (
           <img src={slot.profileImageUrl} alt="" className="w-5 h-5 rounded-full object-cover shadow-sm bg-black/20" />
         ) : (
           <div className="w-2 h-2 ml-2 rounded-full bg-accent animate-pulse"></div>

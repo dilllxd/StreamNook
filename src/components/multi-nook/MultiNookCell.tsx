@@ -10,6 +10,7 @@ import StreamTitleWithEmojis from '../StreamTitleWithEmojis';
 import { Tooltip } from '../ui/Tooltip';
 import { TwitchVerifiedMark } from '../ui/TwitchGlyph';
 import { ProviderLogo } from '../ProviderLogo';
+import { ItzonAvatar } from '../ItzonAvatar';
 import { GripHorizontal, Undo2, Loader2, RefreshCcw, EyeOff, WifiOff, Maximize2, Minimize2 } from 'lucide-react';
 import { Heart, HeartBreak, X as XIcon } from 'phosphor-react';
 import { Logger } from '../../utils/logger';
@@ -318,7 +319,14 @@ const MultiNookCellInner: React.FC<MultiNookCellProps> = ({ slot, cssOrder, grid
           space while the others play. */}
       {loadError && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/85 backdrop-blur-sm z-30 px-4 text-center">
-          {profileImageUrl ? (
+          {provider === 'itzon' ? (
+            <ItzonAvatar
+              src={profileImageUrl}
+              name={channelName || channelLogin}
+              className="w-12 h-12 rounded-full object-cover ring-2 ring-white/10 grayscale opacity-80"
+              fallbackClassName="text-lg"
+            />
+          ) : profileImageUrl ? (
             <img
               src={profileImageUrl}
               alt=""
@@ -390,7 +398,15 @@ const MultiNookCellInner: React.FC<MultiNookCellProps> = ({ slot, cssOrder, grid
             {/* Sized to match the full player's identity row. No live ring on the
                 avatar though — a tile can be offline. */}
             <div className="flex items-center gap-2 min-w-0 mt-1">
-              {profileImageUrl ? (
+              {provider === 'itzon' ? (
+                <ItzonAvatar
+                  src={profileImageUrl}
+                  name={channelName || channelLogin}
+                  className="w-7 h-7 rounded-full object-cover shrink-0 bg-black/20"
+                  fallbackClassName="text-[12px]"
+                  draggable={false}
+                />
+              ) : profileImageUrl ? (
                 <img
                   src={profileImageUrl}
                   alt=""

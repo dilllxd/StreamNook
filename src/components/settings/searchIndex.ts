@@ -57,6 +57,12 @@ export const searchSettings = (
 // of the haystack, so pack synonyms in. Keep this in sync with the command
 // palette catalog in src/utils/commandPaletteSources.ts.
 export const SETTINGS_INDEX: SettingsIndexEntry[] = [
+  {
+    tab: 'Connections',
+    section: 'Platform Accounts',
+    title: 'Platform Connections',
+    description: 'Sign in, connect, or disconnect Twitch, itzon, Kick, and YouTube accounts.'
+  },
   // === Player ===
   {
     tab: 'Player',

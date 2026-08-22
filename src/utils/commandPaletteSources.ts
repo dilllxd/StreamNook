@@ -776,6 +776,7 @@ interface SettingsEntry {
 // primitives, and Plugins is not rendered by SettingsDialog (it lives in the
 // Marketplace overlay), so openSettings('Plugins') would show a blank tab.
 const SETTINGS_CATALOG: SettingsEntry[] = [
+  { tab: 'Connections', keywords: 'connections accounts login sign in twitch itzon kick youtube platform oauth disconnect' },
   // Player
   { tab: 'Player', keywords: 'player video stream playback overlay buttons auto switch streaming codecs audio boost song id' },
   { tab: 'Player', section: 'Player Overlay Buttons', keywords: 'player overlay buttons follow subscribe clip identify song clips vods multinook refresh close hide show customize which buttons top right' },

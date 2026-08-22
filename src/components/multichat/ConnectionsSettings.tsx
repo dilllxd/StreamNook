@@ -1,4 +1,4 @@
-// Connections — the one place to manage platform accounts for MultiChat.
+// Connections — the shared account manager used by the main app and MultiChat.
 //
 // Lists every provider with its connection status and a connect/disconnect
 // action. Twitch is the app's native account (managed in the main app), Kick is
@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { emit } from '@tauri-apps/api/event';
 import { ProviderLogo } from '../ProviderLogo';
 import { PROVIDERS, PROVIDER_IDS, type ProviderId } from '../../types/providers';
 import { useAppStore } from '../../stores/AppStore';
@@ -32,6 +33,8 @@ const LABEL: Record<Status, string> = {
 
 export default function ConnectionsSettings() {
   const currentUser = useAppStore((s) => s.currentUser);
+  const loginToTwitch = useAppStore((s) => s.loginToTwitch);
+  const twitchBusy = useAppStore((s) => s.isLoading);
   const [kickConnected, setKickConnected] = useState(false);
   const [kickName, setKickName] = useState<string | null>(null);
   const [kickBusy, setKickBusy] = useState(false);
@@ -105,6 +108,7 @@ export default function ConnectionsSettings() {
         setItzonConnected(true);
         setItzonName(await invoke<string | null>('itzon_account_name'));
         setItzonAuthMethod(await invoke<ItzonAuthMethod>('itzon_auth_method'));
+        await emit('itzon-connection-changed');
       })
       .catch((error) => Logger.warn('[itzon] connect failed:', error))
       .finally(() => setItzonBusy(false));
@@ -116,6 +120,7 @@ export default function ConnectionsSettings() {
         setItzonConnected(false);
         setItzonName(null);
         setItzonAuthMethod(await invoke<ItzonAuthMethod>('itzon_auth_method'));
+        await emit('itzon-connection-changed');
       })
       .catch(() => {});
   }, []);
@@ -141,7 +146,7 @@ export default function ConnectionsSettings() {
   }, []);
 
   const statusFor = (p: ProviderId): Status => {
-    if (p === 'twitch') return 'native';
+    if (p === 'twitch') return currentUser ? 'native' : 'disconnected';
     if (p === 'itzon') return itzonConnected ? 'connected' : 'disconnected';
     if (p === 'kick') return kickConnected ? 'connected' : 'disconnected';
     if (p === 'youtube') return youtubeConnected ? 'connected' : 'disconnected';
@@ -151,7 +156,8 @@ export default function ConnectionsSettings() {
   // Subtitle, naming the connected account where we know it.
   const subtitleFor = (p: ProviderId, status: Status): string => {
     if (p === 'twitch') {
-      return currentUser?.display_name ? `Connected as ${currentUser.display_name}` : LABEL.native;
+      if (currentUser?.display_name) return `Connected as ${currentUser.display_name}`;
+      return status === 'native' ? LABEL.native : LABEL.disconnected;
     }
     if (p === 'kick' && status === 'connected') {
       return kickName ? `Connected as ${kickName}` : 'Connected';
@@ -175,8 +181,8 @@ export default function ConnectionsSettings() {
   return (
     <div className="space-y-4">
       <p className="text-xs text-textSecondary">
-        Connect your platform accounts to read and send chat across MultiChat. More platforms unlock as their
-        integrations ship.
+        Connect the accounts StreamNook uses for followed channels, playback, and chat. The same connections are
+        available in MultiChat.
       </p>
 
       <div className="hairline-y overflow-hidden rounded-lg border border-borderSubtle">
@@ -202,6 +208,16 @@ export default function ConnectionsSettings() {
               </div>
 
               {/* Account-backed providers connect through their own consent flow. */}
+              {p === 'twitch' && !currentUser && (
+                <button
+                  type="button"
+                  onClick={() => void loginToTwitch()}
+                  disabled={twitchBusy}
+                  className="glass-button-secondary shrink-0 px-3 py-1 text-xs font-semibold text-[#a970ff] transition-colors disabled:opacity-60"
+                >
+                  {twitchBusy ? 'Waiting for sign-in…' : 'Connect'}
+                </button>
+              )}
               {p === 'itzon' &&
                 (itzonConnected ? (
                   <button

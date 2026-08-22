@@ -24,6 +24,7 @@ import { Tooltip } from './ui/Tooltip';
 import { isSemiquincentennialShowDay, openSemiquincentennialShow } from '../services/semiquincentennialEvent';
 import PluginTitleBarButtons from '../plugins-ui/PluginTitleBarButtons';
 import { usePluginUpdates } from '../stores/pluginUpdatesStore';
+import { ProviderLogo } from './ProviderLogo';
 
 /** Maps a bundle-update-progress payload to a 0–100 fill. The download stage
  *  carries a real byte percentage ("Downloading 47%"); the quick post-download
@@ -784,6 +785,17 @@ const TitleBar = () => {
               {whisperImportState.isImporting && (
                 <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-purple-500 rounded-full animate-pulse" />
               )}
+            </button>
+          </Tooltip>
+
+          {/* itzon account */}
+          <Tooltip content="Sign in or manage itzon" delay={200}>
+            <button
+              onClick={() => openSettings('Connections')}
+              className="titlebar-icon-btn"
+              aria-label="Sign in or manage itzon"
+            >
+              <ProviderLogo provider="itzon" size={18} />
             </button>
           </Tooltip>
 

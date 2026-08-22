@@ -6,6 +6,7 @@ import { motion, LayoutGroup, AnimatePresence } from 'framer-motion';
 import { usemultiNookStore } from '../stores/multiNookStore';
 
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import type { TwitchStream, TwitchCategory, CategoryInfo, TwitchClip, TwitchVideo } from '../types';
 import LoadingWidget from './LoadingWidget';
 import StreamTitleWithEmojis from './StreamTitleWithEmojis';
@@ -395,8 +396,12 @@ const Home = () => {
         };
 
         void loadItzonConnection();
+        const unlisten = listen('itzon-connection-changed', () => {
+            void loadItzonConnection();
+        });
         return () => {
             active = false;
+            void unlisten.then(stop => stop());
         };
     }, []);
 

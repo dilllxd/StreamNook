@@ -50,6 +50,15 @@ export interface ItzonChannel {
 export const itzonAvatarUrl = (username: string): string =>
   `https://itzon.tv/api/live/profile/${encodeURIComponent(username.toLowerCase())}/avatar`;
 
+/** The deterministic fallback color used by itzon for profiles without an avatar. */
+export function itzonProfileColor(username: string): string {
+  let hue = 0;
+  for (let index = 0; index < username.length; index += 1) {
+    hue = (hue * 31 + username.charCodeAt(index)) % 360;
+  }
+  return `hsl(${hue}, 65%, 68%)`;
+}
+
 function trustedItzonUrl(value: string, base = 'https://itzon.tv'): string | null {
   try {
     const url = new URL(value, base);

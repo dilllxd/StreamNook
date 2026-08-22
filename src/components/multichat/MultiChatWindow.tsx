@@ -29,6 +29,7 @@ import { useActivityStore } from '../../stores/activityStore';
 import { makeKey, parseKey } from '../../utils/providerKey';
 import { isProviderId, PROVIDERS, type ProviderId } from '../../types/providers';
 import { ProviderLogo } from '../ProviderLogo';
+import { ItzonAvatar } from '../ItzonAvatar';
 import { BlendedChatPane } from './BlendedChatPane';
 import ModRoomPane from '../modroom/ModRoomPane';
 import { useChannelEmotes } from '../../stores/chatConnectionStore';
@@ -3641,6 +3642,16 @@ function StreamerAvatar({
   stream: TwitchStream;
   profileImageUrl: string | null;
 }) {
+  if ((stream.provider ?? 'twitch') === 'itzon') {
+    return (
+      <ItzonAvatar
+        src={profileImageUrl}
+        name={stream.user_name || stream.user_login}
+        className="h-9 w-9 rounded-full bg-surface object-cover"
+        fallbackClassName="text-xs"
+      />
+    );
+  }
   if (profileImageUrl) {
     return (
       <img

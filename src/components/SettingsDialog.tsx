@@ -18,6 +18,7 @@ import {
   User,
   Search,
   LogOut,
+  Link2,
   type LucideIcon,
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
@@ -37,6 +38,7 @@ import CommandPaletteSettings from './settings/CommandPaletteSettings';
 import KeybindingsSettings from './settings/KeybindingsSettings';
 import BackupSettings from './settings/BackupSettings';
 import ProfileSettings from './settings/ProfileSettings';
+import ConnectionsSettings from './multichat/ConnectionsSettings';
 import SettingsSearchResults from './settings/SettingsSearchResults';
 import type { SettingsIndexEntry } from './settings/searchIndex';
 import { Tooltip } from './ui/Tooltip';
@@ -50,6 +52,7 @@ type TabMeta = {
 };
 
 const TABS: TabMeta[] = [
+  { id: 'Connections',     label: 'Connections',     icon: Link2,         tint: 'rgba(110, 205, 145, 0.22)', description: 'Twitch, itzon, and other platform accounts' },
   { id: 'Player',          label: 'Player',          icon: PlayCircle,    tint: 'rgba(120, 155, 200, 0.22)', description: 'Streamlink, video player, and auto-switch' },
   { id: 'Chat',            label: 'Chat',            icon: MessageSquare, tint: 'rgba(150, 160, 210, 0.22)', description: 'Chat design, behavior, and pop-out' },
   { id: 'Moderation',      label: 'Moderation',      icon: Shield,        tint: 'rgba(210, 140, 140, 0.22)', description: 'Mod logs, visibility, and mass actions' },
@@ -449,6 +452,7 @@ const SettingsDialog = () => {
                 ) : (
                   <>
                     {activeTab === 'Profile' && <ProfileSettings />}
+                    {activeTab === 'Connections' && <ConnectionsSettings />}
                     {activeTab === 'Interface' && <InterfaceSettings />}
                     {activeTab === 'Player' && <PlayerSettings />}
                     {activeTab === 'Chat' && <ChatSettings />}

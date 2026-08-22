@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { itzonStreamToTwitchStream, partitionItzonStreams } from './itzon.ts';
+import { itzonProfileColor, itzonStreamToTwitchStream, partitionItzonStreams } from './itzon.ts';
+
+test('matches itzon profile fallback colors', () => {
+  assert.equal(itzonProfileColor('arcade'), 'hsl(128, 65%, 68%)');
+});
 
 test('itzon directory streams are partitioned by normalized follows', () => {
   const streams = [

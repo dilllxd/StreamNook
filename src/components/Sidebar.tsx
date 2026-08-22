@@ -4,6 +4,7 @@ import { useAppStore } from '../stores/AppStore';
 import { ChevronLeft, ChevronRight, Users, Sparkles, Radio, Heart, Gift, Flame } from 'lucide-react';
 import type { TwitchStream } from '../types';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { getSidebarSettings, type SidebarMode } from './settings/InterfaceSettings';
 
 import { useContextMenuStore } from '../stores/contextMenuStore';
@@ -14,6 +15,7 @@ import { ProviderLogo } from './ProviderLogo';
 import { Logger } from '../utils/logger';
 import { useVisibleInterval } from '../utils/useVisibleInterval';
 import { getItzonExplore, getItzonFollowing, itzonStreamToTwitchStream, partitionItzonStreams } from '../services/itzon';
+import { ItzonAvatar } from './ItzonAvatar';
 import { SharedAttemptGate } from '../utils/sharedAttemptGate';
 // Width constants
 const COMPACT_WIDTH = 56;
@@ -148,14 +150,24 @@ const StreamItem = memo(({
             >
             {/* Avatar with live indicator */}
             <div className="relative flex-shrink-0 transition-all duration-200">
-                <img
-                    src={profileImage}
-                    alt={stream.user_name}
-                    className={`rounded-full object-cover transition-all duration-200 ${showExpanded ? 'w-8 h-8' : 'w-9 h-9'}`}
-                    onError={(e) => {
-                        (e.target as HTMLImageElement).src = 'https://static-cdn.jtvnw.net/user-default-pictures-uv/75305d54-c7cc-40d1-bb9c-91c46bf27829-profile_image-70x70.png';
-                    }}
-                />
+                {stream.provider === 'itzon' ? (
+                    <ItzonAvatar
+                        src={profileImage}
+                        name={stream.user_name || stream.user_login}
+                        alt={stream.user_name}
+                        className={`rounded-full object-cover transition-all duration-200 ${showExpanded ? 'w-8 h-8' : 'w-9 h-9'}`}
+                        fallbackClassName="text-sm"
+                    />
+                ) : (
+                    <img
+                        src={profileImage}
+                        alt={stream.user_name}
+                        className={`rounded-full object-cover transition-all duration-200 ${showExpanded ? 'w-8 h-8' : 'w-9 h-9'}`}
+                        onError={(e) => {
+                            (e.target as HTMLImageElement).src = 'https://static-cdn.jtvnw.net/user-default-pictures-uv/75305d54-c7cc-40d1-bb9c-91c46bf27829-profile_image-70x70.png';
+                        }}
+                    />
+                )}
                 {/* Live presence dot: static at rest (the sidebar only ever lists
                     live channels, so a per-row pulse is redundant and, stacked
                     across an expanded list, needless idle animation). Reuses the
@@ -333,6 +345,15 @@ const Sidebar = ({ side = 'left' }: { side?: 'left' | 'right' }) => {
             Logger.warn('[Sidebar] Could not load itzon streams:', error);
         }
     }, []);
+
+    useEffect(() => {
+        const unlisten = listen('itzon-connection-changed', () => {
+            void loadItzonStreams();
+        });
+        return () => {
+            void unlisten.then(stop => stop());
+        };
+    }, [loadItzonStreams]);
 
     // Hover and manual expand states
     const [isHovered, setIsHovered] = useState(false);

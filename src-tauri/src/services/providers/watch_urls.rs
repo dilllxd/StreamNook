@@ -4,6 +4,7 @@
 //!
 //! The accepted shapes mirror what `ProviderStream.watch_url` emits plus what a
 //! user might paste:
+//!   itzon.tv/<slug>                       (NOT /api/, /explore/, /login/)
 //!   kick.com/<slug>                       (NOT /video/, /categories/, /clips/)
 //!   youtube.com/watch?v=<id>, youtu.be/<id>, youtube.com/live/<id>,
 //!   youtube.com/@handle[/live], youtube.com/channel/UC…[/live]
@@ -30,6 +31,30 @@ pub fn classify(url: &str) -> WatchTarget {
         .or_else(|| url.trim().strip_prefix("http://"))
         .unwrap_or(url.trim());
     let stripped = stripped.strip_prefix("www.").unwrap_or(stripped);
+
+    if let Some(rest) = host_path(stripped, "itzon.tv") {
+        let channel = rest.split(['/', '?', '#']).next().unwrap_or("");
+        let channel = channel.to_ascii_lowercase();
+        let reserved = [
+            "api",
+            "oauth",
+            "explore",
+            "search",
+            "categories",
+            "category",
+            "following",
+            "login",
+            "signup",
+            "settings",
+        ];
+        if !channel.is_empty() && !reserved.contains(&channel.as_str()) {
+            return WatchTarget::Provider {
+                provider: "itzon",
+                channel,
+            };
+        }
+        return WatchTarget::Twitch;
+    }
 
     if let Some(rest) = host_path(stripped, "kick.com") {
         // First path segment is the slug; reject Kick's non-channel surfaces.
@@ -154,6 +179,11 @@ mod tests {
             ("", WatchTarget::Twitch),
             ("not a url", WatchTarget::Twitch),
             // Kick
+            ("https://itzon.tv/arcade", provider("itzon", "arcade")),
+            ("https://www.itzon.tv/Arcade?ref=app", provider("itzon", "arcade")),
+            ("https://itzon.tv/api/live/explore", WatchTarget::Twitch),
+            ("https://itzon.tv/explore", WatchTarget::Twitch),
+            ("https://itzon.tv/login", WatchTarget::Twitch),
             ("https://kick.com/xqc", provider("kick", "xqc")),
             ("https://www.kick.com/Trainwreckstv", provider("kick", "trainwreckstv")),
             ("http://kick.com/xqc?clip=x", provider("kick", "xqc")),

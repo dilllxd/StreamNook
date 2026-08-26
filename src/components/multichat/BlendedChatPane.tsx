@@ -464,6 +464,7 @@ export function BlendedChatPane({ channels }: { channels: BlendedChannel[] }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   // From the shared event-driven store. Previously two 5s polls per blended pane,
   // both reading in-memory bools that change only on connect/disconnect.
+  const itzonConnected = usePlatformAccountStore((s) => s.itzon.connected);
   const kickConnected = usePlatformAccountStore((s) => s.kick.connected);
   const youtubeConnected = usePlatformAccountStore((s) => s.youtube.connected);
   // Right-click-a-name reply target. The send routes to THIS source + account,
@@ -479,17 +480,18 @@ export function BlendedChatPane({ channels }: { channels: BlendedChannel[] }) {
   const isOn = useCallback((c: BlendedChannel) => !deselected.has(sourceKey(c)), [deselected]);
   const selected = useMemo(() => channels.filter(isOn), [channels, isOn]);
 
-  // Whether we can actually post to a source: Twitch always; Kick/YouTube once
+  // Whether we can actually post to a source: Twitch always; Itzon/Kick/YouTube once
   // their account is connected; TikTok (and other read-only providers) never.
   const canSendTo = useCallback(
     (c: BlendedChannel) => {
       const p = provOf(c);
       if (p === 'twitch') return true;
+      if (p === 'itzon') return itzonConnected;
       if (p === 'kick') return kickConnected;
       if (p === 'youtube') return youtubeConnected;
       return false;
     },
-    [kickConnected, youtubeConnected],
+    [itzonConnected, kickConnected, youtubeConnected],
   );
   // The per-source picker badge: 'login' (connect to send), 'readonly' (no send
   // path at all), or null (good to go).
@@ -497,11 +499,12 @@ export function BlendedChatPane({ channels }: { channels: BlendedChannel[] }) {
     (c: BlendedChannel): 'login' | 'readonly' | null => {
       const p = provOf(c);
       if (p === 'twitch') return null;
+      if (p === 'itzon') return itzonConnected ? null : 'login';
       if (p === 'kick') return kickConnected ? null : 'login';
       if (p === 'youtube') return youtubeConnected ? null : 'login';
       return 'readonly';
     },
-    [kickConnected, youtubeConnected],
+    [itzonConnected, kickConnected, youtubeConnected],
   );
   const sendableSelected = useMemo(() => selected.filter(canSendTo), [selected, canSendTo]);
 
@@ -633,7 +636,7 @@ export function BlendedChatPane({ channels }: { channels: BlendedChannel[] }) {
       setSending(false);
       return;
     }
-    // Only the chats we can actually post to (Twitch, or a connected Kick/YouTube).
+    // Only the chats we can actually post to (Twitch or a connected provider).
     // A selected-but-not-logged-in (or read-only) source is skipped, never silently
     // "sent" — the picker badges + connect chips tell the user why.
     const targets = selected.filter(canSendTo);

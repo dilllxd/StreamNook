@@ -10,7 +10,7 @@ import { Logger } from '../utils/logger';
  * Connection state for the platforms that have an account you can connect.
  *
  * This replaces six separate `setInterval(check, 5000)` effects — two in
- * ChatWidget (once per Kick/YouTube pane), two in BlendedChatPane, two in
+ * ChatWidget (once per provider pane), two in BlendedChatPane, two in
  * ConnectionsSettings. Every one of them polled `kick_is_connected` /
  * `youtube_is_connected`, which are pure in-memory reads: they answer "do we hold
  * a token", never "does it still work". So they burned an IPC round trip each,
@@ -44,9 +44,10 @@ export interface PlatformAccountState {
 }
 
 interface PlatformAccountStore {
+  itzon: PlatformAccountState;
   kick: PlatformAccountState;
   youtube: PlatformAccountState;
-  /** Re-read connection state from the backend for both platforms. */
+  /** Re-read connection state from the backend for every connectable platform. */
   refresh: () => Promise<void>;
   /** The one connect action for a platform. */
   connect: (provider: PlatformId) => Promise<void>;
@@ -87,7 +88,7 @@ export const usePlatformAccountStore = create<PlatformAccountStore>((set, get) =
    * reported yet", which is also what a report that could not be sent falls
    * back to, so the next read retries it.
    */
-  const reported: Record<PlatformId, boolean | null> = { kick: null, youtube: null };
+  const reported: Record<PlatformId, boolean | null> = { itzon: null, kick: null, youtube: null };
 
   /**
    * Tell the account database that a platform was connected or disconnected.
@@ -136,18 +137,21 @@ export const usePlatformAccountStore = create<PlatformAccountStore>((set, get) =
   };
 
   return {
+    itzon: { ...IDLE },
     kick: { ...IDLE },
     youtube: { ...IDLE },
 
     refresh: async () => {
-      await Promise.all([refreshOne('kick'), refreshOne('youtube')]);
+      await Promise.all([refreshOne('itzon'), refreshOne('kick'), refreshOne('youtube')]);
     },
 
     connect: async (provider) => {
       if (get()[provider].busy) return;
       patch(provider, { busy: true, step: 'Waiting for you to sign in…' });
       try {
-        if (provider === 'kick') {
+        if (provider === 'itzon') {
+          await platformAccounts.beginItzonSession();
+        } else if (provider === 'kick') {
           // ONE window takes consent and then promotes the login into a kick.com
           // session, reading the follow list on the way out. The follow half
           // failing never blocks the connection, so its state is read back below

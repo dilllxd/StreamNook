@@ -1,5 +1,7 @@
 use crate::models::settings::AppState;
 use crate::services::multi_nook_server::MultiNookServer;
+use crate::services::providers::source::PlaybackKind;
+use crate::services::providers::watch_urls::{self, WatchTarget};
 use crate::services::twitch_resolver as tr;
 use log::debug;
 use tauri::State;
@@ -37,6 +39,40 @@ pub async fn start_multi_nook(
         return Err(format!(
             "Maximum of {} concurrent streams reached",
             MAX_STREAMS
+        ));
+    }
+
+    crate::services::providers::itzon_media::stop_heartbeat(&stream_id).await;
+
+    if let WatchTarget::Provider { provider, channel } = watch_urls::classify(&url) {
+        let source = crate::services::providers::registry()
+            .await
+            .get_source(provider)
+            .ok_or_else(|| format!("{} streams aren't supported in this build yet", provider))?;
+        let resolved = source
+            .resolve_playback(&channel, &quality)
+            .await
+            .map_err(|e| e.to_string())?;
+        if resolved.kind != PlaybackKind::Hls {
+            return Err(format!("{} playback is not supported in MultiNook yet", provider));
+        }
+        let port = MultiNookServer::start_proxy(&stream_id, resolved.url)
+            .await
+            .map_err(|e| e.to_string())?;
+        if provider == "itzon" {
+            if let Some(playback) =
+                crate::services::providers::itzon_media::take_resolved_playback(&channel).await
+            {
+                crate::services::providers::itzon_media::start_heartbeat(&stream_id, &playback)
+                    .await;
+            }
+        }
+        let low_latency = MultiNookServer::is_low_latency(&stream_id).await;
+        return Ok(format!(
+            "http://localhost:{}/stream.m3u8?t={}{}",
+            port,
+            chrono::Utc::now().timestamp_millis(),
+            if low_latency { "&ll=1" } else { "" }
         ));
     }
 
@@ -97,6 +133,7 @@ pub async fn start_multi_nook(
 #[tauri::command]
 pub async fn stop_multi_nook(stream_id: String) -> Result<(), String> {
     debug!("[MultiNook] Stopping stream: {}", stream_id);
+    crate::services::providers::itzon_media::stop_heartbeat(&stream_id).await;
     MultiNookServer::stop_instance(&stream_id)
         .await
         .map_err(|e| e.to_string())
@@ -106,6 +143,9 @@ pub async fn stop_multi_nook(stream_id: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn stop_all_multi_nooks() -> Result<(), String> {
     debug!("[MultiNook] Stopping all multi-stream instances");
+    for stream_id in MultiNookServer::get_active_streams().await {
+        crate::services::providers::itzon_media::stop_heartbeat(&stream_id).await;
+    }
     MultiNookServer::stop_all().await.map_err(|e| e.to_string())
 }
 

@@ -12,6 +12,7 @@ import { usemultiNookStore } from '../stores/multiNookStore';
 import { Tooltip } from './ui/Tooltip';
 import StreamHoverCard, { STREAM_HOVER_CARD_CLASS } from './StreamHoverCard';
 import { ProviderLogo } from './ProviderLogo';
+import { ItzonAvatar } from './ItzonAvatar';
 import { useFollowsStore } from '../stores/followsStore';
 import { streamProvider, streamKey } from '../utils/streamProvider';
 import { useStreamAvatars } from '../hooks/useStreamAvatars';
@@ -147,14 +148,23 @@ const StreamItem = memo(({
             >
             {/* Avatar with live indicator */}
             <div className="relative flex-shrink-0 transition-all duration-200">
-                <img
-                    src={profileImage}
-                    alt={stream.user_name}
-                    className={`rounded-full object-cover transition-all duration-200 ${showExpanded ? 'w-8 h-8' : 'w-9 h-9'}`}
-                    onError={(e) => {
-                        (e.target as HTMLImageElement).src = 'https://static-cdn.jtvnw.net/user-default-pictures-uv/75305d54-c7cc-40d1-bb9c-91c46bf27829-profile_image-70x70.png';
-                    }}
-                />
+                {streamProvider(stream) === 'itzon' ? (
+                    <ItzonAvatar
+                        src={profileImage}
+                        name={stream.user_name || stream.user_login}
+                        alt={stream.user_name}
+                        className={`rounded-full object-cover transition-all duration-200 ${showExpanded ? 'w-8 h-8' : 'w-9 h-9'}`}
+                    />
+                ) : (
+                    <img
+                        src={profileImage}
+                        alt={stream.user_name}
+                        className={`rounded-full object-cover transition-all duration-200 ${showExpanded ? 'w-8 h-8' : 'w-9 h-9'}`}
+                        onError={(e) => {
+                            (e.target as HTMLImageElement).src = 'https://static-cdn.jtvnw.net/user-default-pictures-uv/75305d54-c7cc-40d1-bb9c-91c46bf27829-profile_image-70x70.png';
+                        }}
+                    />
+                )}
                 {/* Live presence dot: static at rest (the sidebar only ever lists
                     live channels, so a per-row pulse is redundant and, stacked
                     across an expanded list, needless idle animation). Reuses the
@@ -671,14 +681,9 @@ const Sidebar = ({ side = 'left' }: { side?: 'left' | 'right' }) => {
         // matches the right-click context-menu "Add to MultiNook" action.
         if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
-            // The grid resolves twitch.tv URLs per tile, so it stays Twitch-only
-            // for now rather than failing silently on a provider row.
-            if (streamProvider(stream) !== 'twitch') {
-                useAppStore.getState().addToast('MultiNook supports Twitch channels for now', 'info');
-                return;
-            }
+            const provider = streamProvider(stream);
             usemultiNookStore.getState().triggerAddAnimation(e.clientX, e.clientY, stream.user_login);
-            usemultiNookStore.getState().addSlot(stream.user_login);
+            usemultiNookStore.getState().addSlot(stream.user_login, provider);
             return;
         }
         // Exit home/PIP mode when clicking on a new stream from sidebar

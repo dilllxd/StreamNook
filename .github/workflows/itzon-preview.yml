@@ -1,0 +1,162 @@
+name: Build Itzon preview
+
+on:
+  push:
+    branches: [feat/itzon-provider-v8.5]
+    tags: ["v*-itzon.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: itzon-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    outputs:
+      artifact: ${{ steps.package.outputs.artifact }}
+    env:
+      TWITCH_APP_CLIENT_ID: ${{ vars.TWITCH_CLIENT_ID || '0m4qk7ioh6vplpig0hvatpj44mbqsb' }}
+      TWITCH_ANDROID_CLIENT_ID: kd1unb4b3q4t58fwlpcbzcbnm76a8fp
+      TWITCH_WEB_CLIENT_ID: kimne78kx3ncx6brgo4mv6wki5h1ko
+      KICK_APP_CLIENT_ID: ${{ secrets.KICK_APP_CLIENT_ID }}
+      KICK_APP_CLIENT_SECRET: ${{ secrets.KICK_APP_CLIENT_SECRET }}
+      ITZON_OAUTH_CLIENT_ID: ${{ vars.ITZON_OAUTH_CLIENT_ID || '956c2bcc5de7c1a24af49b64da1ebfc8' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Validate release configuration
+        shell: pwsh
+        run: |
+          $cargo = Get-Content src-tauri/Cargo.toml -Raw
+          if ($cargo -notmatch 'version\s*=\s*"([^"]+)"') {
+            throw 'Could not read the application version'
+          }
+          $version = $Matches[1]
+          "VERSION=$version" | Out-File $env:GITHUB_ENV -Append
+
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            if ($env:GITHUB_REF_NAME -ne "v$version") {
+              throw "Tag $env:GITHUB_REF_NAME does not match v$version"
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($env:KICK_APP_CLIENT_ID) -or
+              [string]::IsNullOrWhiteSpace($env:KICK_APP_CLIENT_SECRET)) {
+            Write-Output '::warning::Kick credentials are missing; this branch artifact cannot sign in to Kick'
+          }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test frontend
+        shell: pwsh
+        run: |
+          npm run build
+          npx tsx --test "src/**/*.test.ts"
+
+      - name: Test Rust
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build portable executable
+        run: npm run tauri build -- --no-bundle
+
+      - name: Package artifact
+        id: package
+        shell: pwsh
+        run: |
+          $artifact = "StreamNook-Itzon-$env:VERSION-windows-x64"
+          $package = Join-Path artifacts $artifact
+          New-Item -ItemType Directory -Force -Path $package | Out-Null
+          Copy-Item src-tauri/target/release/StreamNook.exe $package
+          Copy-Item src-tauri/target/release/StreamNook.exe artifacts/StreamNook.exe
+          Copy-Item README.md, LICENSE, THIRD-PARTY-NOTICES.md $package
+          Copy-Item docs/itzon.md $package
+          Compress-Archive -Path "$package/*" -DestinationPath "artifacts/$artifact.zip"
+
+          Push-Location artifacts
+          7z a -t7z -mx=9 StreamNook.7z StreamNook.exe
+          Pop-Location
+
+          $components = @{
+            schema_version = 1
+            streamnook = @{
+              version = $env:VERSION
+              build_date = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+            }
+            components = @{
+              streamlink = @{ version = ''; source_url = 'https://github.com/streamlink/windows-builds/releases' }
+              ttvlol = @{ version = ''; source_url = 'https://github.com/2bc4/streamlink-ttvlol/releases' }
+            }
+          }
+          $components | ConvertTo-Json -Depth 10 | Set-Content artifacts/components.json
+
+          $bundleHash = (Get-FileHash artifacts/StreamNook.7z -Algorithm SHA256).Hash.ToLower()
+          $zipHash = (Get-FileHash "artifacts/$artifact.zip" -Algorithm SHA256).Hash.ToLower()
+          @(
+            "$bundleHash  StreamNook.7z"
+            "$zipHash  $artifact.zip"
+          ) | Set-Content artifacts/checksums.txt
+
+          $manifest = [ordered]@{
+            version = $env:VERSION
+            download_url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/v$env:VERSION/StreamNook.7z"
+            bundle_name = 'StreamNook.7z'
+            sha256 = $bundleHash
+            size = (Get-Item artifacts/StreamNook.7z).Length
+            notes = "StreamNook $env:VERSION with Itzon support."
+            min_supported = '8.5.1-itzon.1'
+          }
+          $manifest | ConvertTo-Json -Depth 4 | Set-Content artifacts/update.json
+          "artifact=$artifact" | Out-File $env:GITHUB_OUTPUT -Append
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.artifact }}
+          path: |
+            artifacts/*.zip
+            artifacts/StreamNook.exe
+            artifacts/StreamNook.7z
+            artifacts/components.json
+            artifacts/checksums.txt
+            artifacts/update.json
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.windows.outputs.artifact }}
+          path: artifacts
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "StreamNook Itzon preview ${GITHUB_REF_NAME#v}" \
+            --notes "Unsigned Windows preview based on StreamNook v8.5.1 with Itzon support." \
+            artifacts/*

@@ -11,6 +11,7 @@
 // of leaving an orphan localStorage record per session.
 
 import { Logger } from './logger';
+import type { ProviderId } from '../types/providers';
 
 export interface OpenMultiChatOptions {
   /** Optional channel to pre-load (used when popping out from a watched stream).
@@ -23,9 +24,16 @@ export interface OpenMultiChatOptions {
   /** Display name (proper capitalization) for the channel — used for the tab
    *  label and window title until the popout's own metadata poll lands. */
   channelName?: string;
+  /** Source platform. Absent means Twitch for backward compatibility. */
+  provider?: ProviderId;
   /** Multiple channels to seed/add at once — e.g. popping out every MultiNook
    *  tile's chat in one click. Takes precedence over the single-channel fields. */
-  channels?: Array<{ channel: string; channelId?: string | null; channelName?: string | null }>;
+  channels?: Array<{
+    channel: string;
+    channelId?: string | null;
+    channelName?: string | null;
+    provider?: ProviderId;
+  }>;
   /** Replace the popout's entire tab set with exactly these channels (a fresh
    *  view) instead of merging/appending into whatever was already open. */
   replace?: boolean;
@@ -93,12 +101,18 @@ export async function openMultiChatWindow(options: OpenMultiChatOptions = {}): P
     const channelList = (options.channels && options.channels.length > 0
       ? options.channels
       : options.channel
-        ? [{ channel: options.channel, channelId: options.channelId, channelName: options.channelName }]
+        ? [{
+            channel: options.channel,
+            channelId: options.channelId,
+            channelName: options.channelName,
+            provider: options.provider,
+          }]
         : []
     ).map((c) => ({
       channel: c.channel.toLowerCase(),
       channelId: c.channelId ?? null,
       channelName: c.channelName ?? c.channel,
+      provider: c.provider ?? 'twitch',
     }));
 
     // If a popout already exists, focus it and ask it to add each requested
@@ -127,6 +141,7 @@ export async function openMultiChatWindow(options: OpenMultiChatOptions = {}): P
               channel: c.channel,
               channelId: c.channelId,
               channelName: c.channelName,
+              provider: c.provider,
             });
           } catch (err) {
             Logger.warn('[MultiChat] emit multichat-add-channel failed:', err);
@@ -143,6 +158,7 @@ export async function openMultiChatWindow(options: OpenMultiChatOptions = {}): P
       params.set('channel', channelList[0].channel);
       if (channelList[0].channelId) params.set('channelId', channelList[0].channelId);
       if (channelList[0].channelName) params.set('channelName', channelList[0].channelName);
+      params.set('provider', channelList[0].provider);
     } else if (channelList.length > 1) {
       // Multiple channels: seed them all on first mount via a JSON param, so a
       // brand-new window doesn't race an event listener that isn't up yet.

@@ -2,15 +2,14 @@
 
 <img src="src-tauri/images/logo.png" alt="StreamNook" width="200" />
 
-# StreamNook
+# StreamNook with Itzon
 
-A native desktop client for Twitch, Kick, and YouTube.
+A native desktop client for Twitch, Itzon, Kick, and YouTube.
 
 <p>
-  <a href="https://github.com/winters27/StreamNook/releases/latest"><img src="https://img.shields.io/github/v/release/winters27/StreamNook?color=ff6b6b&style=for-the-badge&logo=github&logoColor=white&labelColor=1a1a2e" alt="Latest release" /></a>
-  <a href="https://github.com/winters27/StreamNook/stargazers"><img src="https://img.shields.io/github/stars/winters27/StreamNook?color=00d9ff&style=for-the-badge&logo=star&logoColor=white&labelColor=1a1a2e" alt="Stars" /></a>
-  <a href="https://github.com/winters27/StreamNook/issues"><img src="https://img.shields.io/badge/Issues-ff6b6b?style=for-the-badge&logo=github&logoColor=white&labelColor=1a1a2e" alt="Issues" /></a>
-  <a href="https://github.com/winters27/StreamNook/discussions"><img src="https://img.shields.io/badge/Discussions-4ecdc4?style=for-the-badge&logo=github&logoColor=white&labelColor=1a1a2e" alt="Discussions" /></a>
+  <a href="https://github.com/dilllxd/StreamNook/releases"><img src="https://img.shields.io/github/v/release/dilllxd/StreamNook?include_prereleases&color=ff6b6b&style=for-the-badge&logo=github&logoColor=white&labelColor=1a1a2e" alt="Latest preview" /></a>
+  <a href="https://github.com/dilllxd/StreamNook/stargazers"><img src="https://img.shields.io/github/stars/dilllxd/StreamNook?color=00d9ff&style=for-the-badge&logo=star&logoColor=white&labelColor=1a1a2e" alt="Stars" /></a>
+  <a href="https://github.com/dilllxd/StreamNook/issues"><img src="https://img.shields.io/badge/Issues-ff6b6b?style=for-the-badge&logo=github&logoColor=white&labelColor=1a1a2e" alt="Issues" /></a>
 </p>
 
 <p>
@@ -19,7 +18,7 @@ A native desktop client for Twitch, Kick, and YouTube.
   <img src="https://img.shields.io/badge/Tauri-FFC131?style=for-the-badge&logo=tauri&logoColor=white&labelColor=1a1a2e" alt="Tauri" />
 </p>
 
-<h3><a href="https://github.com/winters27/StreamNook/releases/latest">Download the latest release</a></h3>
+<h3><a href="https://github.com/dilllxd/StreamNook/releases">Download the latest preview</a></h3>
 
 <sub>Windows. Extract and run, everything else is built in.</sub>
 
@@ -29,7 +28,7 @@ A native desktop client for Twitch, Kick, and YouTube.
 
 You're grinding through your 47th hour of that indie roguelike, talking to yourself about optimal build paths, when you realize *I need human voices*. But opening a stream in a browser? That's like inviting a resource-hungry elephant to sit on your CPU. Your fans spin up, your frame rate tanks, and suddenly you're choosing between watching streams and actually playing games.
 
-StreamNook is the answer to this very specific but deeply relatable problem. Built from the ground up with Rust and React, it delivers a smooth viewing experience that sips resources instead of chugging them. The cozy corner of the internet where you can watch streams, chat with communities, and track your favorite streamers without turning your PC into a space heater. Twitch, Kick, and YouTube, all in the same window.
+StreamNook is the answer to this very specific but deeply relatable problem. Built from the ground up with Rust and React, it delivers a smooth viewing experience that sips resources instead of chugging them. The cozy corner of the internet where you can watch streams, chat with communities, and track your favorite streamers without turning your PC into a space heater. Twitch, Itzon, Kick, and YouTube, all in the same window.
 
 ## Platforms
 
@@ -37,7 +36,7 @@ StreamNook is the answer to this very specific but deeply relatable problem. Bui
   <img src="src-tauri/images/platforms.png" alt="Platform picker showing Twitch, Kick, and YouTube with live counts" width="1000" />
 </div>
 
-**One list, every platform.** A picker in the title bar switches between Twitch, Kick, and YouTube, or shows all of them at once, with a live count for each. Your follows from every connected account land in one list on Home and in the sidebar, so a single glance tells you what is live.
+**One list, every platform.** A picker in the title bar switches between Twitch, Itzon, Kick, and YouTube, or shows all of them at once, with a live count for each. Your follows from every connected account land in one list on Home and in the sidebar, so a single glance tells you what is live.
 
 **Browse and watch the same way everywhere.** Directories, categories, and channel search per platform, all opening in the same player with the same quality control, theater mode, Compact View, and MultiNook.
 
@@ -45,9 +44,9 @@ StreamNook is the answer to this very specific but deeply relatable problem. Bui
   <img src="src-tauri/images/home_platforms.png" alt="Followed channels from every platform in one list" width="1000" />
 </div>
 
-**Chat with the tools you already use.** Replies, mentions, tab completion, moderation, user cards, and room mode indicators on every platform, plus each one's own events rendered properly: Kick subscriptions, gifted subs, and pins, YouTube Super Chats, Super Stickers, memberships, and gift redemptions. Chat opens with recent history instead of an empty pane.
+**Chat with the tools you already use.** Messages, emotes, replies, mentions, and tab completion share one interface, while moderation and platform-specific events appear where each API supports them. Chat opens with recent history instead of an empty pane.
 
-**7TV everywhere.** Channel emote sets, paints, and badges resolve on Kick and YouTube too, for you and for everyone else in chat. Kick's own channel emotes are in the picker, and YouTube's custom emoji are learned from chat as they arrive.
+**7TV everywhere.** Channel emote sets, paints, and badges resolve on Itzon, Kick, and YouTube too, for you and for everyone else in chat. Itzon and Kick channel emotes appear in the picker, and YouTube's custom emoji are learned from chat as they arrive.
 
 <div align="center">
   <img src="src-tauri/images/youtube_chat.png" alt="A YouTube stream with badges, emotes, replies, and moderation rendered like Twitch" width="1000" />
@@ -214,9 +213,9 @@ Rust, TypeScript, React, and Tailwind. Packaged as a native desktop app with Tau
 
 ## Install
 
-1. Grab the latest build from the [Releases page](https://github.com/winters27/StreamNook/releases/latest).
+1. Grab the latest preview build from this fork's [Releases page](https://github.com/dilllxd/StreamNook/releases).
 2. Extract and run.
-3. Follow the setup wizard to sign in with Twitch, then connect Kick or YouTube from Settings whenever you want them.
+3. Follow the setup wizard, then connect Twitch, Itzon, Kick, or YouTube from the account settings.
 
 Everything's built in. Nothing else to install.
 
@@ -226,7 +225,8 @@ Everything's built in. Nothing else to install.
 - [Plyr](https://plyr.io/), video player.
 - [HLS.js](https://github.com/video-dev/hls.js), HLS streaming support.
 - [7TV](https://7tv.app/), extended emotes and cosmetics.
-- [Twitch](https://dev.twitch.tv/), [Kick](https://kick.com/), and [YouTube](https://www.youtube.com/), platforms and APIs.
+- [Twitch](https://dev.twitch.tv/), [Itzon](https://itzon.tv/), [Kick](https://kick.com/), and [YouTube](https://www.youtube.com/), platforms and APIs.
+- [StreamNook](https://github.com/winters27/StreamNook), the upstream project.
 
 ## License
 
@@ -259,6 +259,6 @@ Third-party components keep their own licenses. See
 
 <div align="center">
 
-<sub>StreamNook is not affiliated with Twitch Interactive, Inc., Kick, or Google LLC.</sub>
+<sub>This fork is not affiliated with Itzon, Twitch Interactive, Inc., Kick, or Google LLC.</sub>
 
 </div>

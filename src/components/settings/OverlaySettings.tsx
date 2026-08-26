@@ -2,8 +2,8 @@
 // Left: controls. Right: a large scaled preview that renders the SAME renderer
 // the hosted overlay uses (OverlayChat) at the chosen canvas size, so streamers
 // see exactly how many chats fit and what viewers will see. Multi-source, like
-// MultiChat: add Twitch/Kick/YouTube/TikTok channels and preview the merged feed
-// (Twitch connects live now; the others join once the overlay service ships).
+// MultiChat: add Twitch/Itzon/Kick/YouTube/TikTok channels and preview the merged feed
+// through the shared provider chat adapters.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
@@ -56,7 +56,7 @@ const SOURCES_KEY = 'sn_overlay_sources_v1';
 // new link each time.
 const OVERLAY_ID_KEY = 'sn_overlay_id_v1';
 const PUBLISH_ENDPOINT = 'https://streamnook.app/api/overlays';
-const SOURCE_PROVIDERS: ProviderId[] = ['twitch', 'kick', 'youtube', 'tiktok'];
+const SOURCE_PROVIDERS: ProviderId[] = ['twitch', 'itzon', 'kick', 'youtube', 'tiktok'];
 
 function loadOverlayId(): string | null {
   try { return localStorage.getItem(OVERLAY_ID_KEY); } catch { return null; }
@@ -65,7 +65,7 @@ function loadOverlayId(): string | null {
 interface OverlaySource { provider: ProviderId; channel: string; }
 
 const PROVIDER_LABEL: Partial<Record<ProviderId, string>> = {
-  twitch: 'Twitch', kick: 'Kick', youtube: 'YouTube', tiktok: 'TikTok',
+  twitch: 'Twitch', itzon: 'itzon', kick: 'Kick', youtube: 'YouTube', tiktok: 'TikTok',
 };
 const providerLabel = (p: ProviderId): string => PROVIDER_LABEL[p] ?? p;
 
@@ -148,6 +148,7 @@ function parseTikTokInput(input: string): string | null {
 
 const SOURCE_PLACEHOLDER: Record<ProviderId, string> = {
   twitch: 'Twitch login (e.g. sodapoppin)',
+  itzon: 'itzon channel (e.g. arcade)',
   kick: 'Kick channel (e.g. trainwreckstv)',
   youtube: 'YouTube channel or link (e.g. mrbeast)',
   tiktok: 'TikTok @handle or LIVE link',

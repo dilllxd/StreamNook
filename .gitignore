@@ -16,6 +16,7 @@ scripts/*
 # is versioned with the code that implements it.
 docs/*
 !docs/plugins/
+!docs/itzon.md
 
 # Drops folder (local mining tool) - only root level, not src/components/drops
 /drops/
@@ -61,3 +62,6 @@ badge-assets-r2/
 # src-tauri/build.rs when it is missing or stale. ~700KB of minified output that
 # rewrites wholesale on any source edit, so it is built rather than committed.
 src-tauri/potoken/mint.bundle.js
+
+# Local GUI verification captures
+/cua-*.png

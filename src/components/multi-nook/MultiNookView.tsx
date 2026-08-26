@@ -28,6 +28,7 @@ import { acquireChannel, releaseChannel } from '../../stores/chatConnectionStore
 import { Logger } from '../../utils/logger';
 import { useVisibleInterval } from '../../utils/useVisibleInterval';
 import { useMultiNookSync } from './useMultiNookSync';
+import { makeKey, parseKey } from '../../utils/providerKey';
 
 const DOCK_DROP_ID = 'dock-drop-zone';
 const UNDOCK_DROP_ID = 'undock-drop-zone';
@@ -78,20 +79,24 @@ export const MultiNookView: React.FC = () => {
   useEffect(() => {
     const desired = new Map<string, string | null>();
     for (const s of visibleSlots) {
-      desired.set(s.channelLogin.toLowerCase(), s.channelId ?? null);
+      const provider = s.provider ?? 'twitch';
+      const key = provider === 'twitch' ? s.channelLogin.toLowerCase() : makeKey(provider, s.channelLogin);
+      desired.set(key, s.channelId ?? null);
     }
-    for (const [login, channelId] of desired) {
-      if (!connectedChatKeysRef.current.has(login)) {
-        connectedChatKeysRef.current.add(login);
-        void acquireChannel(login, channelId).catch((err) =>
+    for (const [key, channelId] of desired) {
+      if (!connectedChatKeysRef.current.has(key)) {
+        connectedChatKeysRef.current.add(key);
+        const parsed = parseKey(key);
+        void acquireChannel(parsed.channel, channelId, parsed.provider).catch((err) =>
           Logger.error('[MultiNook] background chat acquire failed:', err),
         );
       }
     }
-    for (const login of Array.from(connectedChatKeysRef.current)) {
-      if (!desired.has(login)) {
-        connectedChatKeysRef.current.delete(login);
-        void releaseChannel(login).catch((err) =>
+    for (const key of Array.from(connectedChatKeysRef.current)) {
+      if (!desired.has(key)) {
+        connectedChatKeysRef.current.delete(key);
+        const parsed = parseKey(key);
+        void releaseChannel(parsed.channel, parsed.provider).catch((err) =>
           Logger.warn('[MultiNook] background chat release failed:', err),
         );
       }
@@ -102,8 +107,9 @@ export const MultiNookView: React.FC = () => {
   useEffect(() => {
     const keys = connectedChatKeysRef.current;
     return () => {
-      for (const login of Array.from(keys)) {
-        void releaseChannel(login).catch(() => {});
+      for (const key of Array.from(keys)) {
+        const parsed = parseKey(key);
+        void releaseChannel(parsed.channel, parsed.provider).catch(() => {});
       }
       keys.clear();
     };

@@ -7,9 +7,7 @@
 //! returned room token; the scoped Twitch token never leaves the desktop.
 
 use crate::services::modroom_auth_service as auth;
-use crate::utils::oauth_server;
 use serde::Serialize;
-use std::time::Duration;
 use tauri::AppHandle;
 
 /// Gate Worker base (custom domain on the streamnook.app zone).
@@ -35,36 +33,16 @@ pub async fn modroom_status() -> Result<ModRoomStatus, String> {
 pub async fn modroom_connect(app: AppHandle) -> Result<ModRoomStatus, String> {
     use tauri_plugin_opener::OpenerExt;
 
-    let state = format!("{:032x}", rand::random::<u128>());
-
-    // Bind the callback before opening the browser so a fast redirect is not missed.
-    let listener = oauth_server::start_oauth_listener_on(8765)
+    let flow = auth::start_device_authorization()
         .await
         .map_err(|e| e.to_string())?;
-
-    let url = auth::build_authorize_url(&state).map_err(|e| e.to_string())?;
     app.opener()
-        .open_url(url, None::<String>)
+        .open_url(flow.verification_uri, None::<String>)
         .map_err(|e| format!("Failed to open browser: {}", e))?;
-
-    let callback = listener
-        .wait(Duration::from_secs(300))
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if let Some(err) = callback.error {
-        return Err(format!("Consent was cancelled or failed: {}", err));
-    }
-    if callback.state.as_deref() != Some(state.as_str()) {
-        return Err("Consent could not be verified (state mismatch). Please try again.".to_string());
-    }
-    if callback.code.is_empty() {
-        return Err("Twitch did not return an authorization code.".to_string());
-    }
-
-    let cred = auth::connect_with_code(&callback.code)
-        .await
-        .map_err(|e| e.to_string())?;
+    let cred =
+        auth::complete_device_authorization(&flow.device_code, flow.interval, flow.expires_in)
+            .await
+            .map_err(|e| e.to_string())?;
     Ok(ModRoomStatus {
         connected: true,
         login: Some(cred.login),

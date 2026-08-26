@@ -4,6 +4,7 @@
 
 import { Tooltip } from './ui/Tooltip';
 import twitchLogo from '../assets/provider-logos/twitch.svg?url';
+import itzonLogo from '../assets/provider-logos/itzon-small.png?url';
 import kickLogo from '../assets/provider-logos/kick.svg?url';
 import youtubeLogo from '../assets/provider-logos/youtube.svg?url';
 import tiktokLogo from '../assets/provider-logos/tiktok.svg?url';
@@ -11,6 +12,7 @@ import { PROVIDERS, type ProviderId } from '../types/providers';
 
 const LOGOS: Partial<Record<ProviderId, string>> = {
   twitch: twitchLogo,
+  itzon: itzonLogo,
   kick: kickLogo,
   youtube: youtubeLogo,
   tiktok: tiktokLogo,

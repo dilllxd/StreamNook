@@ -26,7 +26,7 @@ import { streamProvider } from '../utils/streamProvider';
 import { parseBadges } from '../services/twitchBadges';
 import { invoke } from '@tauri-apps/api/core';
 import { fetchRecentMessagesAsIRC } from '../services/ivrService';
-import { fetchAllEmotes, fetchKickChannelEmotes, fetchYouTubeChannelEmotes, type EmoteSet } from '../services/emoteService';
+import { fetchAllEmotes, fetchItzonChannelEmotes, fetchKickChannelEmotes, fetchYouTubeChannelEmotes, type EmoteSet } from '../services/emoteService';
 import { Logger } from '../utils/logger';
 import { useAppStore } from './AppStore';
 import { useGiftBombStore, type GiftRecipient } from './giftBombStore';
@@ -423,7 +423,9 @@ export async function ensureChannelEmotes(
       // channel-emote fetch — its messages are plain text baked at parse time,
       // so there is no picker set to fetch.
       const set =
-        provider === 'kick'
+        provider === 'itzon'
+          ? await fetchItzonChannelEmotes(channel.toLowerCase())
+          : provider === 'kick'
           ? await fetchKickChannelEmotes(channel.toLowerCase())
           : provider === 'youtube'
             ? await fetchYouTubeChannelEmotes(channel.toLowerCase())
@@ -919,7 +921,7 @@ function startHealthCheck() {
       const { handleStreamOffline, currentStream, isAutoSwitching } = useAppStore.getState();
       if (!currentStream || isAutoSwitching) return;
       // `check_stream_online` is Helix, so it would look up a same-named TWITCH
-      // channel for a Kick/YouTube/TikTok stream and answer about the wrong
+      // channel for a provider stream and answer about the wrong
       // thing entirely. Provider streams have their own liveness poll in
       // AppStore, so here we only reconnect the socket.
       if (streamProvider(currentStream) !== 'twitch') {
@@ -949,7 +951,7 @@ function startHealthCheck() {
               watchdogCycles = 0;
               try {
                 // Recovery intent, NOT user intent: this must tear the shared WS
-                // bridge down even when Kick/YouTube panes are riding it, because
+                // bridge down even when provider panes are riding it, because
                 // rebuilding it is the whole point. `stop_chat` deliberately
                 // preserves the bridge for those providers and so cannot recover
                 // a wedged task. Provider slices come back via reconnectAll below.
@@ -1515,6 +1517,21 @@ function handleWsMessage(raw: string) {
   if (raw.startsWith('{')) {
     try {
       const parsed = JSON.parse(raw);
+      if (parsed.type === 'PROVIDER_CONNECTION' || parsed.type === 'PROVIDER_HEARTBEAT') {
+        const ch = (parsed.channel as string | undefined)?.toLowerCase();
+        if (ch) {
+          withSlice(ch, (slice) => {
+            const connected = parsed.type === 'PROVIDER_HEARTBEAT' || parsed.connected === true;
+            slice.isConnected = connected;
+            slice.error = connected
+              ? null
+              : parsed.state === 'reconnecting'
+                ? 'Reconnecting to chat...'
+                : null;
+          });
+        }
+        return;
+      }
       if (parsed.type === 'CLEARMSG' && parsed.target_msg_id) {
         const ch = (parsed.channel as string | undefined)?.toLowerCase();
         const modSettings = useAppStore.getState().settings.moderation;
@@ -2841,7 +2858,9 @@ export function useChannelEmotes(
     if (!key || !channel) return;
     const unsubscribe = subscribeChannelEmotes(key, () => setVersion((v) => v + 1));
     // Kick fetches by slug (no channelId needed); Twitch needs the numeric id.
-    if (provider === 'kick' || channelId) void ensureChannelEmotes(channel, channelId ?? '', provider);
+    if (provider === 'kick' || provider === 'itzon' || channelId) {
+      void ensureChannelEmotes(channel, channelId ?? '', provider);
+    }
     return unsubscribe;
   }, [key, channel, channelId, provider]);
 

@@ -12,7 +12,7 @@ export interface GitHubRelease {
   prerelease: boolean;
 }
 
-const REPO = 'winters27/StreamNook';
+const REPO = 'dilllxd/StreamNook';
 const RELEASES_URL = `https://api.github.com/repos/${REPO}/releases?per_page=20`;
 // Bumped to _v2 when the cache schema gained an etag field.
 const CACHE_KEY = 'streamnook_whatsnew_cache_v2';

@@ -25,10 +25,9 @@ export function getAccountCount(): Promise<number> {
 }
 
 /**
- * Link a new secondary account. Opens the system browser to Twitch's forced
- * account chooser; resolves with the linked account once sign-in completes, or
- * rejects with a message (cancelled, timed out, or "already your primary").
- * Never touches the primary's cached token.
+ * Link a new secondary account with Twitch's Device Code Flow. Resolves with
+ * the linked account once authorization completes and never touches the
+ * primary's cached token.
  */
 export function addAccount(): Promise<StoredAccount> {
   return invoke<StoredAccount>('add_twitch_account');

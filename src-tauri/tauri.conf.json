@@ -1,7 +1,7 @@
 {
   "productName": "StreamNook",
-  "version": "8.5.1",
-  "identifier": "com.streamnook.dev",
+  "version": "8.5.1-itzon.1",
+  "identifier": "com.dilllxd.streamnook.itzon",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",

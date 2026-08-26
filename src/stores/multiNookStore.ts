@@ -3,6 +3,11 @@ import { invoke } from '@tauri-apps/api/core';
 import { useAppStore } from './AppStore';
 import { MultiNookSlot, MultiNookPresetChannel } from '../types';
 import { Logger } from '../utils/logger';
+import type { ProviderId } from '../types/providers';
+import { buildProviderUrl } from '../utils/streamProvider';
+
+const slotProvider = (slot: Pick<MultiNookSlot, 'provider'>): ProviderId => slot.provider ?? 'twitch';
+const slotKey = (provider: ProviderId, channel: string) => `${provider}:${channel.toLowerCase()}`;
 
 /** Slot ids whose proxy start is currently in flight. The loader effect re-fires
  *  on every slots change, so this guards against re-invoking start_multi_nook for
@@ -122,7 +127,7 @@ interface MultiNookState {
   toggleMultiNook: () => void;
   triggerAddAnimation: (x: number, y: number, channelLogin: string) => void;
   triggerRecallAnimation: (channelLogin: string, cardX: number, cardY: number) => void;
-  addSlot: (channelLogin: string) => Promise<void>;
+  addSlot: (channelLogin: string, provider?: ProviderId) => Promise<void>;
   removeSlot: (id: string) => Promise<void>;
   removeSlotByLogin: (channelLogin: string) => Promise<void>;
   updateSlot: (id: string, updates: Partial<MultiNookSlot>) => void;
@@ -199,7 +204,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
         try {
           const url = await invoke<string>('start_multi_nook', {
             streamId: slot.id,
-            url: `https://twitch.tv/${slot.channelLogin}`,
+            url: buildProviderUrl(slotProvider(slot), slot.channelLogin),
             quality: slot.quality || 'best', // Per-tile quality (set via the focused tile's gear menu)
           });
           set((state) => ({
@@ -220,8 +225,50 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
   },
 
   refreshSlotMetadata: async () => {
+    const providerUpdates = await Promise.all(
+      get()
+        .slots.filter((slot) => slotProvider(slot) !== 'twitch')
+        .map(async (slot) => {
+          try {
+            const meta = await invoke<{
+              title: string;
+              game_name: string;
+              user_name: string;
+              profile_image_url?: string;
+              is_live: boolean;
+            }>('provider_channel_meta', {
+              provider: slotProvider(slot),
+              channel: slot.channelLogin,
+            });
+            return { id: slot.id, meta };
+          } catch {
+            return null;
+          }
+        }),
+    );
+    const byId = new Map(
+      providerUpdates
+        .filter((item): item is NonNullable<typeof item> => item !== null)
+        .map((item) => [item.id, item.meta]),
+    );
+    if (byId.size > 0) {
+      set((state) => ({
+        slots: state.slots.map((slot) => {
+          const meta = byId.get(slot.id);
+          if (!meta) return slot;
+          return {
+            ...slot,
+            title: meta.is_live ? meta.title || undefined : undefined,
+            gameName: meta.game_name || slot.gameName,
+            channelName: meta.user_name || slot.channelName,
+            profileImageUrl: meta.profile_image_url || slot.profileImageUrl,
+          };
+        }),
+      }));
+    }
+
     const logins = Array.from(
-      new Set(get().slots.map((s) => s.channelLogin.toLowerCase())),
+      new Set(get().slots.filter((s) => slotProvider(s) === 'twitch').map((s) => s.channelLogin.toLowerCase())),
     ).filter(Boolean);
     if (logins.length === 0) return;
 
@@ -255,6 +302,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     // branch — a tile with no title must come back as the *same* object.
     let changed = false;
     const next = get().slots.map((s) => {
+      if (slotProvider(s) !== 'twitch') return s;
       const live = byLogin.get(s.channelLogin.toLowerCase());
       if (!live) {
         // Absent from the response means offline. Drop the title (a stale live
@@ -286,7 +334,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     const missing = Array.from(
       new Set(
         get()
-          .slots.filter((s) => s.broadcasterType === undefined)
+          .slots.filter((s) => slotProvider(s) === 'twitch' && s.broadcasterType === undefined)
           .map((s) => s.channelLogin.toLowerCase()),
       ),
     ).filter(Boolean);
@@ -330,7 +378,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     // Drop duplicate logins inside the preset itself, preserving order.
     const seen = new Set<string>();
     const unique = channels.filter((ch) => {
-      const key = ch.channelLogin.toLowerCase();
+      const key = slotKey(ch.provider ?? 'twitch', ch.channelLogin);
       if (!key || seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -340,7 +388,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
       // Reuse the single-add path so dedup-against-grid, the 25 cap, proxy start,
       // and fresh Twitch metadata enrichment all behave exactly like a manual add.
       for (const ch of unique) {
-        await get().addSlot(ch.channelLogin);
+        await get().addSlot(ch.channelLogin, ch.provider ?? 'twitch');
       }
       return;
     }
@@ -355,7 +403,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
       Logger.error('[MultiNook] Failed to stop proxies before loading preset', e);
     }
     for (const slot of outgoing) {
-      if (slot.channelId) {
+      if (slotProvider(slot) === 'twitch' && slot.channelId) {
         invoke('unregister_active_channel', { channelId: slot.channelId }).catch(() => {});
       }
     }
@@ -375,6 +423,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     const base = Date.now();
     const newSlots: MultiNookSlot[] = capped.map((ch, i) => ({
       id: `cell-${base}-${i}`,
+      provider: ch.provider,
       channelLogin: ch.channelLogin,
       channelId: ch.channelId || undefined,
       channelName: ch.channelName || ch.channelLogin,
@@ -391,7 +440,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     set({ slots: newSlots, activeChatChannelId: pickActiveChatChannel(newSlots), activePresetId: presetId ?? null, maximizedSlotId: null });
 
     for (const slot of newSlots) {
-      if (slot.channelId) {
+      if (slotProvider(slot) === 'twitch' && slot.channelId) {
         invoke('register_active_channel', { channelId: slot.channelId }).catch(() => {});
       }
     }
@@ -419,7 +468,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
       Logger.error('[MultiNook] Failed to stop proxies on clearAllSlots', e);
     }
     for (const slot of current) {
-      if (slot.channelId) {
+      if (slotProvider(slot) === 'twitch' && slot.channelId) {
         invoke('unregister_active_channel', { channelId: slot.channelId }).catch(() => {});
       }
     }
@@ -542,7 +591,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
         if (currentSlots.length > 0) {
           broadcastMultiNookPresence(currentSlots);
           for (const slot of currentSlots) {
-            if (slot.channelId) {
+            if (slotProvider(slot) === 'twitch' && slot.channelId) {
                invoke('register_active_channel', { channelId: slot.channelId }).catch(() => {});
             }
           }
@@ -558,7 +607,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
       
       const currentSlots = get().slots;
       for (const slot of currentSlots) {
-        if (slot.channelId) {
+        if (slotProvider(slot) === 'twitch' && slot.channelId) {
            invoke('unregister_active_channel', { channelId: slot.channelId }).catch(() => {});
         }
       }
@@ -580,13 +629,13 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     set({ isMultiNookActive: newState });
   },
 
-  addSlot: async (channelLogin: string) => {
+  addSlot: async (channelLogin: string, provider: ProviderId = 'twitch') => {
     if (get().slots.length >= 25) {
       useAppStore.getState().addToast('Maximum of 25 streams reached', 'warning');
       return;
     }
     
-    if (get().slots.some(s => s.channelLogin.toLowerCase() === channelLogin.toLowerCase())) {
+    if (get().slots.some(s => slotProvider(s) === provider && s.channelLogin.toLowerCase() === channelLogin.toLowerCase())) {
       useAppStore.getState().addToast(`${channelLogin} is already in the view`, 'info');
       return;
     }
@@ -598,6 +647,20 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     let resolvedTitle = '';
     let resolvedBroadcasterType = '';
     try {
+      if (provider !== 'twitch') {
+        const meta = await invoke<{
+          user_id: string;
+          user_name: string;
+          profile_image_url?: string;
+          game_name: string;
+          title: string;
+        }>('provider_channel_meta', { provider, channel: channelLogin });
+        resolvedId = meta.user_id;
+        resolvedName = meta.user_name;
+        resolvedImage = meta.profile_image_url ?? '';
+        resolvedGameName = meta.game_name;
+        resolvedTitle = meta.title;
+      } else {
       const [clientId, token] = await invoke<[string, string]>('get_twitch_credentials');
       const response = await fetch(`https://api.twitch.tv/helix/users?login=${channelLogin}`, {
         headers: {
@@ -633,6 +696,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
           }
         }
       }
+      }
     } catch (e) {
       Logger.warn('[multiNookStore] Failed to resolve channel details for', channelLogin, e);
     }
@@ -641,12 +705,13 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
     const { slots, saveSlots } = get();
     
     // Double check it wasn't added concurrently while we were fetching
-    if (slots.some(s => s.channelLogin.toLowerCase() === channelLogin.toLowerCase())) {
+    if (slots.some(s => slotProvider(s) === provider && s.channelLogin.toLowerCase() === channelLogin.toLowerCase())) {
       return;
     }
 
     const newSlot: MultiNookSlot = {
       id: `cell-${Date.now()}`,
+      provider: provider === 'twitch' ? undefined : provider,
       channelLogin,
       channelId: resolvedId || undefined,
       channelName: resolvedName || channelLogin,
@@ -668,7 +733,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
        set({ activeChatChannelId: newSlot.channelId ?? newSlot.channelLogin });
     }
     
-    if (newSlot.channelId) {
+    if (provider === 'twitch' && newSlot.channelId) {
        invoke('register_active_channel', { channelId: newSlot.channelId }).catch(() => {});
     }
     // The mod view (EventSub channel.moderate) follows the chat connection now,
@@ -691,7 +756,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
       }
     }
     
-    if (slotToRemove?.channelId) {
+    if (slotToRemove && slotProvider(slotToRemove) === 'twitch' && slotToRemove.channelId) {
        invoke('unregister_active_channel', { channelId: slotToRemove.channelId }).catch(() => {});
     }
 
@@ -989,7 +1054,11 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
         // up to 100 logins) and persist the fresh values.
         void (async () => {
           const logins = Array.from(
-            new Set(cleanedSlots.map((s) => s.channelLogin.toLowerCase())),
+            new Set(
+              cleanedSlots
+                .filter((s) => slotProvider(s) === 'twitch')
+                .map((s) => s.channelLogin.toLowerCase()),
+            ),
           ).filter(Boolean);
           if (logins.length === 0) return;
           try {
@@ -1004,6 +1073,7 @@ export const usemultiNookStore = create<MultiNookState>((set, get) => ({
             for (const u of data.data || []) byLogin.set((u.login || '').toLowerCase(), u);
             let changed = false;
             const next = get().slots.map((s) => {
+              if (slotProvider(s) !== 'twitch') return s;
               const u = byLogin.get(s.channelLogin.toLowerCase());
               if (!u || !u.profile_image_url) return s;
               if (

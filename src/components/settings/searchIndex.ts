@@ -996,7 +996,7 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     tab: 'Overlay',
     section: 'Sources',
     title: 'Sources',
-    description: 'Choose which platforms feed the overlay (Twitch, Kick, YouTube, TikTok) and whether to tag each message with its source platform.'
+    description: 'Choose which platforms feed the overlay (Twitch, itzon, Kick, YouTube, TikTok) and whether to tag each message with its source platform.'
   },
   {
     tab: 'Overlay',

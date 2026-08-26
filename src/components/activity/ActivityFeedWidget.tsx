@@ -98,12 +98,19 @@ function SourceAvatar({ provider, login, color }: { provider: ProviderId; login:
   useEffect(() => {
     if (url || !login) return;
     let active = true;
-    // Per-provider avatar source: Twitch via Helix, Kick + YouTube from the channel
+    // Per-provider avatar source: Twitch via Helix, others from the channel
     // metadata the read adapters already cached at resolve time.
     const resolve = async (): Promise<string | undefined> => {
       if (provider === 'twitch') {
         const info = await invoke<{ profile_image_url?: string }>('get_user_by_login', { login }).catch(() => null);
         return info?.profile_image_url ?? undefined;
+      }
+      if (provider === 'itzon') {
+        const m = await invoke<{ profile_image_url?: string | null }>('provider_channel_meta', {
+          provider,
+          channel: login,
+        }).catch(() => null);
+        return m?.profile_image_url ?? undefined;
       }
       if (provider === 'kick') {
         const m = await invoke<{ profile_pic?: string | null } | null>('get_kick_channel_meta', { slug: login }).catch(() => null);
@@ -325,9 +332,8 @@ const ActivityRow = memo(function ActivityRow({
   targetCurrency: string;
 }) {
   const provider = PROVIDERS[e.provider];
-  // Color the row by PROVIDER so platforms are visually separated (Twitch purple,
-  // Kick green, YouTube red), instead of by kind where a Twitch sub and a Kick sub
-  // were both purple. The kind is still conveyed by the label + icon + stat pill.
+  // Color the row by provider so events from different platforms stay visually
+  // distinct. The kind is still conveyed by the label, icon, and stat pill.
   const color = provider?.color ?? colorForKind(e.kind);
   const time = useMemo(() => {
     try {
@@ -338,16 +344,15 @@ const ActivityRow = memo(function ActivityRow({
   }, [e.timestamp]);
 
   // When the feed spans several streams, label each row with its source (the
-  // broadcaster's avatar + name, provider-colored so the same streamer's Twitch
-  // vs Kick vs YouTube rows are distinguishable in blended mode). Otherwise just
-  // tag the platform.
+  // broadcaster's avatar + name, provider-colored so the same streamer remains
+  // distinguishable across platforms. Otherwise just tag the platform.
   const sourceLogin = parseKey(e.channel).channel;
   const meta = (
     <span className="ml-auto flex min-w-0 flex-shrink-0 items-center gap-1">
       {multiSource ? (
         <>
           {/* Platform mark leads, then the broadcaster's avatar + name, so the
-              source's provider (Twitch/Kick/YouTube) reads first. */}
+              source's provider reads first. */}
           <ProviderLogo provider={e.provider} size={Math.max(10, Math.round(fontSize * 0.78))} />
           <SourceAvatar provider={e.provider} login={sourceLogin} color={provider?.color ?? '#888'} />
           <Tooltip content={sourceName || sourceLogin}>

@@ -392,6 +392,42 @@ pub async fn get_youtube_channel_emotes(
 }
 
 #[tauri::command]
+pub async fn itzon_connect(app: tauri::AppHandle) -> Result<(), String> {
+    crate::services::itzon_auth_service::connect()
+        .await
+        .map_err(|error| error.to_string())?;
+    crate::services::providers::emit_platform_account_changed(&["itzon"]);
+    use tauri::Emitter;
+    let _ = app.emit("itzon-connection-changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn itzon_disconnect(app: tauri::AppHandle) {
+    crate::services::itzon_auth_service::disconnect().await;
+    crate::services::providers::emit_platform_account_changed(&["itzon"]);
+    use tauri::Emitter;
+    let _ = app.emit("itzon-connection-changed", ());
+}
+
+#[tauri::command]
+pub fn itzon_is_connected() -> bool {
+    crate::services::itzon_auth_service::is_connected()
+}
+
+#[tauri::command]
+pub async fn itzon_restore_session() -> bool {
+    crate::services::itzon_auth_service::restore().await
+}
+
+#[tauri::command]
+pub async fn get_itzon_channel_emotes(
+    slug: String,
+) -> crate::services::emote_service::EmoteSet {
+    crate::services::providers::itzon_emotes::channel_emote_set(&slug).await
+}
+
+#[tauri::command]
 pub async fn stop_chat() -> Result<(), String> {
     ChatService::stop().await.map_err(|e| e.to_string())
 }
@@ -409,6 +445,10 @@ pub struct PlatformAccountInfo {
 #[tauri::command]
 pub async fn platform_account_info(provider: String) -> PlatformAccountInfo {
     match provider.as_str() {
+        "itzon" => PlatformAccountInfo {
+            name: crate::services::itzon_auth_service::account_name(),
+            avatar_url: None,
+        },
         "kick" => {
             let (name, avatar_url) = crate::services::kick_auth_service::account_identity().await;
             PlatformAccountInfo { name, avatar_url }
@@ -437,6 +477,12 @@ pub async fn platform_account_info(provider: String) -> PlatformAccountInfo {
 pub async fn validate_platform_sessions(app: tauri::AppHandle) -> Vec<String> {
     use tauri::Emitter;
     let mut signed_out: Vec<String> = Vec::new();
+
+    if crate::services::itzon_auth_service::is_connected()
+        && !crate::services::itzon_auth_service::ensure_valid().await
+    {
+        signed_out.push("itzon".to_string());
+    }
 
     if crate::services::kick_auth_service::is_connected()
         && crate::services::kick_auth_service::validate_session().await == Some(false)

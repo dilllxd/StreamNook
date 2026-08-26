@@ -37,11 +37,13 @@ export default function ConnectionsSettings() {
   // `kick_is_connected` / `youtube_is_connected`. It now comes from the shared
   // store, which is event-driven, so this panel costs nothing while it is open.
   const kick = usePlatformAccountStore((s) => s.kick);
+  const itzon = usePlatformAccountStore((s) => s.itzon);
   const youtube = usePlatformAccountStore((s) => s.youtube);
   const connectPlatform = usePlatformAccountStore((s) => s.connect);
   const disconnectPlatform = usePlatformAccountStore((s) => s.disconnect);
   const resyncYoutube = usePlatformAccountStore((s) => s.resyncYoutube);
   const { connected: kickConnected, name: kickName, busy: kickBusy, step: kickStep } = kick;
+  const { connected: itzonConnected, name: itzonName, busy: itzonBusy, step: itzonStep } = itzon;
   const {
     connected: youtubeConnected,
     name: youtubeName,
@@ -54,6 +56,8 @@ export default function ConnectionsSettings() {
   // Accounts cannot drift into two different ways of connecting the same account.
   const connectKick = useCallback(() => void connectPlatform('kick'), [connectPlatform]);
   const disconnectKick = useCallback(() => void disconnectPlatform('kick'), [disconnectPlatform]);
+  const connectItzon = useCallback(() => void connectPlatform('itzon'), [connectPlatform]);
+  const disconnectItzon = useCallback(() => void disconnectPlatform('itzon'), [disconnectPlatform]);
   const connectYoutube = useCallback(() => void connectPlatform('youtube'), [connectPlatform]);
   const disconnectYoutube = useCallback(
     () => void disconnectPlatform('youtube'),
@@ -64,10 +68,12 @@ export default function ConnectionsSettings() {
   // many channels came across rather than making that a second thing to do.
   const follows = useFollowsStore((s) => s.follows);
   const kickFollowCount = follows.filter((f) => f.provider === 'kick').length;
+  const itzonFollowCount = follows.filter((f) => f.provider === 'itzon').length;
   const youtubeFollowCount = follows.filter((f) => f.provider === 'youtube').length;
 
   const statusFor = (p: ProviderId): Status => {
     if (p === 'twitch') return 'native';
+    if (p === 'itzon') return itzonConnected ? 'connected' : 'disconnected';
     if (p === 'kick') return kickConnected ? 'connected' : 'disconnected';
     if (p === 'youtube') return youtubeConnected ? 'connected' : 'disconnected';
     // A read-only adapter with no sign-in (TikTok) is working as designed, not
@@ -89,6 +95,12 @@ export default function ConnectionsSettings() {
       // actually brought their channels across, with no second row to explain.
       return kickFollowCount > 0
         ? `${who} · ${kickFollowCount} channel${kickFollowCount === 1 ? '' : 's'}`
+        : who;
+    }
+    if (p === 'itzon' && status === 'connected') {
+      const who = itzonName ? `Connected as ${itzonName}` : 'Connected';
+      return itzonFollowCount > 0
+        ? `${who} · ${itzonFollowCount} channel${itzonFollowCount === 1 ? '' : 's'}`
         : who;
     }
     if (p === 'youtube' && status === 'connected') {
@@ -127,7 +139,9 @@ export default function ConnectionsSettings() {
                     className="inline-block h-1.5 w-1.5 rounded-full"
                     style={{ backgroundColor: DOT[status] }}
                   />
-                  {p === 'kick' && kickStep
+                  {p === 'itzon' && itzonStep
+                    ? itzonStep
+                    : p === 'kick' && kickStep
                     ? kickStep
                     : p === 'youtube' && youtubeStep
                       ? youtubeStep
@@ -135,7 +149,26 @@ export default function ConnectionsSettings() {
                 </div>
               </div>
 
-              {/* Action — Kick + YouTube connect through here. */}
+              {p === 'itzon' &&
+                (itzonConnected ? (
+                  <button
+                    type="button"
+                    onClick={disconnectItzon}
+                    className="glass-button-secondary shrink-0 px-3 py-1 text-xs font-medium text-textSecondary transition-colors hover:text-red-400"
+                  >
+                    Disconnect
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void connectItzon()}
+                    disabled={itzonBusy}
+                    className="glass-button-secondary shrink-0 px-3 py-1 text-xs font-semibold transition-colors disabled:opacity-60"
+                    style={{ color: PROVIDERS.itzon.color }}
+                  >
+                    {itzonBusy ? 'Connecting…' : 'Connect'}
+                  </button>
+                ))}
               {p === 'kick' &&
                 (kickConnected ? (
                   <button

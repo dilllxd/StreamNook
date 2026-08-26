@@ -13,6 +13,7 @@ import { StreamTileTags } from './StreamTileTags';
 import { useContextMenuStore } from '../stores/contextMenuStore';
 import { Tooltip } from './ui/Tooltip';
 import { ProviderLogo } from './ProviderLogo';
+import { ItzonAvatar } from './ItzonAvatar';
 import { usePlatformAccountStore } from '../stores/platformAccountStore';
 import { PlatformLoginButton } from './PlatformLoginButton';
 import { WATCHABLE_PROVIDERS, PROVIDER_WATCH, providerLabel, type ProviderId, type ProviderCategory } from '../types/providers';
@@ -275,7 +276,14 @@ const QuickAddButton = ({ stream }: { stream: TwitchStream }) => {
         return () => window.removeEventListener('resize', resizeListener);
     }, []);
 
-    if (slots.some(s => s.channelLogin.toLowerCase() === stream.user_login.toLowerCase())) return null;
+    const provider = streamProvider(stream);
+    if (
+        slots.some(
+            (s) =>
+                (s.provider ?? 'twitch') === provider &&
+                s.channelLogin.toLowerCase() === stream.user_login.toLowerCase(),
+        )
+    ) return null;
 
     return (
         <div 
@@ -288,7 +296,7 @@ const QuickAddButton = ({ stream }: { stream: TwitchStream }) => {
                     onClick={(e) => {
                         e.stopPropagation();
                         triggerAddAnimation(e.clientX, e.clientY, stream.user_login);
-                        addSlot(stream.user_login);
+                        addSlot(stream.user_login, provider);
                     }}
                     className="flex items-center justify-center glass-button !rounded-full aspect-square !p-1.5 text-white shadow-[0_4px_10px_rgba(0,0,0,0.5)]"
                 >
@@ -500,14 +508,18 @@ const Home = () => {
     // re-render and must not do it whenever an unrelated account field changes.
     // Twitch and the unified view answer `true` — they have their own gate.
     const providerConnected = usePlatformAccountStore((s) =>
-        providerFilter === 'kick'
+        providerFilter === 'itzon'
+            ? s.itzon.connected
+            : providerFilter === 'kick'
             ? s.kick.connected
             : providerFilter === 'youtube'
               ? s.youtube.connected
               : true,
     );
     const providerConnecting = usePlatformAccountStore((s) =>
-        providerFilter === 'kick'
+        providerFilter === 'itzon'
+            ? s.itzon.busy
+            : providerFilter === 'kick'
             ? s.kick.busy
             : providerFilter === 'youtube'
               ? s.youtube.busy
@@ -1481,13 +1493,8 @@ const Home = () => {
         // matches the right-click context-menu "Add to MultiNook" action.
         if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
-            // The grid is Twitch-only for now (its tiles resolve twitch.tv URLs).
-            if (provider !== 'twitch') {
-                useAppStore.getState().addToast(`MultiNook supports Twitch channels for now`, 'info');
-                return;
-            }
             usemultiNookStore.getState().triggerAddAnimation(e.clientX, e.clientY, stream.user_login);
-            usemultiNookStore.getState().addSlot(stream.user_login);
+            usemultiNookStore.getState().addSlot(stream.user_login, provider);
             return;
         }
         // Track which category this stream was started from (if any)
@@ -2978,7 +2985,14 @@ const Home = () => {
                                                                     </h3>
                                                                     <div className="flex items-center justify-between">
                                                                         <div className="flex items-center gap-1">
-                                                                            {(stream.profile_image_url || cardAvatars[streamKey(stream)]) && (
+                                                                            {streamProvider(stream) === 'itzon' ? (
+                                                                                <ItzonAvatar
+                                                                                    loading="lazy"
+                                                                                    src={stream.profile_image_url || cardAvatars[streamKey(stream)]}
+                                                                                    name={stream.user_name || stream.user_login}
+                                                                                    className="w-4 h-4 rounded-full object-cover flex-shrink-0 ring-1 ring-borderSubtle"
+                                                                                />
+                                                                            ) : (stream.profile_image_url || cardAvatars[streamKey(stream)]) && (
                                                                                 <img
                                                                                     loading="lazy"
                                                                                     src={stream.profile_image_url || cardAvatars[streamKey(stream)]}
@@ -3191,7 +3205,7 @@ const Home = () => {
                                     <div className="flex justify-center">
                                         <PlatformLoginButton
                                             provider={providerFilter as ProviderId}
-                                            onClick={() => void connectPlatformAccount(providerFilter as 'kick' | 'youtube')}
+                                            onClick={() => void connectPlatformAccount(providerFilter as 'itzon' | 'kick' | 'youtube')}
                                             busy={providerConnecting}
                                         />
                                     </div>
@@ -3253,7 +3267,7 @@ const Home = () => {
                                             <div className="flex justify-center">
                                                 <PlatformLoginButton
                                                     provider={providerFilter as ProviderId}
-                                                    onClick={() => void connectPlatformAccount(providerFilter as 'kick' | 'youtube')}
+                                                    onClick={() => void connectPlatformAccount(providerFilter as 'itzon' | 'kick' | 'youtube')}
                                                     busy={providerConnecting}
                                                 />
                                             </div>
@@ -3438,7 +3452,14 @@ const Home = () => {
                                                                             platform's default picture. */}
                                                                         {/* No placeholder when a platform ships no avatar: a row of
                                                                             identical grey monograms is noise, not information. */}
-                                                                        {(stream.profile_image_url || cardAvatars[streamKey(stream)]) && (
+                                                                        {streamProvider(stream) === 'itzon' ? (
+                                                                            <ItzonAvatar
+                                                                                loading="lazy"
+                                                                                src={stream.profile_image_url || cardAvatars[streamKey(stream)]}
+                                                                                name={stream.user_name || stream.user_login}
+                                                                                className="w-4 h-4 rounded-full object-cover flex-shrink-0 ring-1 ring-borderSubtle"
+                                                                            />
+                                                                        ) : (stream.profile_image_url || cardAvatars[streamKey(stream)]) && (
                                                                             <img
                                                                                 loading="lazy"
                                                                                 src={stream.profile_image_url || cardAvatars[streamKey(stream)]}

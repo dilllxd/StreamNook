@@ -634,6 +634,7 @@ export interface CustomTheme {
 
 export interface MultiNookSlot {
   id: string;             // Unique identifier for the slot (e.g., cell-1)
+  provider?: ProviderId;  // Absent means Twitch for persisted v8.4 grids
   channelLogin: string;   // The Twitch channel login name
   channelId?: string;     // The Twitch user ID for chat connection mapping
   channelName?: string;   // The capitalization-correct display name
@@ -654,6 +655,7 @@ export interface MultiNookSlot {
  *  of MultiNookSlot. A preset records *which* channels to open, not transient
  *  view state (volume/mute/focus/minimize), which is re-derived on load. */
 export interface MultiNookPresetChannel {
+  provider?: ProviderId;
   channelLogin: string;      // The Twitch channel login name (canonical key)
   channelId?: string;        // Twitch user ID, cached for instant chat mapping on load
   channelName?: string;      // Capitalization-correct display name for the preset UI

@@ -28,6 +28,7 @@ interface ViewerStat {
 const VIEWER_POLL_MS = 45_000;
 
 function metaCommandFor(provider: ProviderId): string | null {
+  if (provider === 'itzon') return 'provider_channel_meta';
   if (provider === 'kick') return 'get_kick_channel_meta';
   if (provider === 'youtube') return 'get_youtube_channel_meta';
   if (provider === 'tiktok') return 'get_tiktok_channel_meta';
@@ -47,9 +48,10 @@ async function fetchStat(src: ViewerSource): Promise<ViewerStat> {
     }
     const cmd = metaCommandFor(provider);
     if (cmd) {
-      const m = await invoke<{ viewer_count?: number | null; is_live?: boolean } | null>(cmd, {
-        slug,
-      });
+      const m = await invoke<{ viewer_count?: number | null; is_live?: boolean } | null>(
+        cmd,
+        provider === 'itzon' ? { provider, channel: slug } : { slug },
+      );
       return { ...base, count: m?.viewer_count ?? null, isLive: m?.is_live ?? false };
     }
   } catch {

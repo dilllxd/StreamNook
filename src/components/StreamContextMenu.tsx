@@ -8,6 +8,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { buildShareUrl } from '../utils/shareLink';
 import { replaceInputRange } from '../utils/chatInputWord';
 import { addToCustomDictionary } from '../utils/spellcheck';
+import { streamProvider } from '../utils/streamProvider';
 
 export const StreamContextMenu: React.FC = () => {
     const { isOpen, x, y, stream, inputElement, selectionText, menuType, spellStatus, spell, isFollowing, isCheckingFollow, closeMenu, toggleFollow } = useContextMenuStore();
@@ -269,7 +270,7 @@ export const StreamContextMenu: React.FC = () => {
 
         // Trigger flying animation from context menu click position
         usemultiNookStore.getState().triggerAddAnimation(x, y, stream.user_login);
-        addSlot(stream.user_login);
+        addSlot(stream.user_login, streamProvider(stream));
 
         closeMenu();
     };

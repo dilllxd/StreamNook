@@ -515,6 +515,35 @@ export async function fetchKickChannelEmotes(slug: string): Promise<EmoteSet> {
   }
 }
 
+export async function fetchItzonChannelEmotes(slug: string): Promise<EmoteSet> {
+  await ensureEmoteFileCache();
+  try {
+    const emoteSet = await invoke<EmoteSet>('get_itzon_channel_emotes', { slug });
+    const enhance = (emotes: any[]) =>
+      (emotes ?? []).map((emote) => {
+        const localPath = cachedEmoteFiles.get(emoteCacheKey(emote.id, emote.provider));
+        return {
+          ...emote,
+          isZeroWidth: emote.is_zero_width ?? emote.isZeroWidth,
+          modifierFlags: emote.modifier_flags ?? emote.modifierFlags,
+          ffzSubOnly: emote.ffz_sub_only ?? emote.ffzSubOnly,
+          localUrl: localPath ? convertFileSrc(localPath) : undefined,
+        };
+      });
+    return {
+      twitch: enhance(emoteSet.twitch),
+      bttv: enhance(emoteSet.bttv),
+      '7tv': enhance(emoteSet['7tv']),
+      ffz: enhance(emoteSet.ffz),
+      kick: enhance(emoteSet.kick),
+      youtube: [],
+    };
+  } catch (error) {
+    Logger.warn('[EmoteService] Failed to fetch itzon channel emotes:', error);
+    return { twitch: [], bttv: [], '7tv': [], ffz: [], kick: [], youtube: [] };
+  }
+}
+
 /**
  * A YouTube channel's 7TV emotes for the picker. Separate from the channel's
  * OWN emoji (seeded into providerEmoteStore from the chat page) — a channel can

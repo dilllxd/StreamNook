@@ -114,6 +114,7 @@ const MultiNookPresets: React.FC = () => {
       channelName: s.channelName,
       profileImageUrl: s.profileImageUrl,
       quality: s.quality,
+      provider: s.provider ?? 'twitch',
     }));
     setView({ mode: 'editor', editingId: null, seed, seedName: suggestNameFromSlots() });
   }, []);

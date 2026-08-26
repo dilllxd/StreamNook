@@ -7,6 +7,9 @@
 //! generic chat webview. Twitch keeps its own dedicated path in `irc_service`.
 
 pub mod hls_master;
+pub mod itzon;
+pub mod itzon_emotes;
+pub mod itzon_media;
 pub mod key;
 pub mod kick;
 pub mod kick_account;
@@ -183,10 +186,12 @@ pub async fn registry() -> &'static ProviderRegistry {
     REGISTRY
         .get_or_init(|| async {
             let mut reg = ProviderRegistry::default();
+            reg.register(Arc::new(itzon::ItzonProvider::new()));
             reg.register(Arc::new(kick::KickProvider::new()));
             reg.register(Arc::new(youtube::YouTubeProvider::new()));
             reg.register(Arc::new(tiktok::TikTokProvider::new()));
             // Watch/browse adapters, added per platform phase.
+            reg.register_source(Arc::new(itzon_media::ItzonSource::new()));
             reg.register_source(Arc::new(kick_media::KickSource::new()));
             reg.register_source(Arc::new(youtube_media::YouTubeSource::new()));
             reg

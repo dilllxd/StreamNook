@@ -386,7 +386,7 @@ export interface EventTemplateContext {
   // ── Context ──────────────────────────────────────────────────────────────
   /** The channel the event landed in. */
   channel?: string;
-  /** Platform label: Twitch, Kick, YouTube, TikTok. */
+  /** Platform label, such as Twitch, itzon, Kick, YouTube, or TikTok. */
   platform?: string;
   /** The event's timestamp, formatted the way the overlay formats timestamps. */
   time?: string;
@@ -587,7 +587,7 @@ export const FONT_OPTIONS: { label: string; value: string }[] = [
 export const DEFAULT_OVERLAY_STYLE: OverlayStyle = {
   width: 400,
   height: 640,
-  sources: ['twitch', 'kick', 'youtube', 'tiktok'],
+  sources: ['twitch', 'itzon', 'kick', 'youtube', 'tiktok'],
   sourceTag: 'dot',
   fontFamily: FONT_OPTIONS[0].value,
   fontSize: 15,

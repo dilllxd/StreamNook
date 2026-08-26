@@ -2921,18 +2921,10 @@ pub fn convert_emoji_shortcodes(text: &str) -> String {
             }
 
             if !matched {
-                // No closing : found or no match, output what we collected
-                if shortcode.len() > 1 && !shortcode.ends_with(':') {
+                // A complete unknown shortcode was already copied above. Only
+                // incomplete candidates still need to be appended here.
+                if shortcode.len() == 1 || !shortcode.ends_with(':') {
                     result.push_str(&shortcode);
-                } else if !matched {
-                    result.push(':');
-                    // Put back the collected characters if we didn't consume a full shortcode
-                    if shortcode.len() > 1 && shortcode.ends_with(':') {
-                        // We consumed a full potential shortcode but it didn't match
-                        result.push_str(&shortcode[1..]);
-                    } else {
-                        result.push_str(&shortcode[1..]);
-                    }
                 }
             }
         } else {
@@ -3130,5 +3122,6 @@ mod tests {
     fn test_partial_shortcodes() {
         assert_eq!(convert_emoji_shortcodes("This is :joy"), "This is :joy");
         assert_eq!(convert_emoji_shortcodes("This is joy:"), "This is joy:");
+        assert_eq!(convert_emoji_shortcodes("Time: now"), "Time: now");
     }
 }

@@ -19,6 +19,7 @@ import StreamTitleWithEmojis from './StreamTitleWithEmojis';
 import PlayerStatsOverlay from './PlayerStatsOverlay';
 import { Tooltip } from './ui/Tooltip';
 import { TwitchVerifiedMark } from './ui/TwitchGlyph';
+import { ItzonAvatar } from './ItzonAvatar';
 import { registerPlayerControls, type PlayerControls } from '../keybindings';
 import { qualitiesEquivalent } from '../utils/quality';
 
@@ -2323,8 +2324,11 @@ const VideoPlayer = () => {
 
     const login = stream.user_login;
     const mn = usemultiNookStore.getState();
+    const provider = streamProvider(stream);
     const alreadyPresent = mn.slots.some(
-      (s) => s.channelLogin.toLowerCase() === login.toLowerCase()
+      (s) =>
+        (s.provider ?? 'twitch') === provider &&
+        s.channelLogin.toLowerCase() === login.toLowerCase(),
     );
 
     // MultiNook holds at most 25 tiles. addSlot enforces this too (with its own
@@ -2338,7 +2342,7 @@ const VideoPlayer = () => {
     // Await the add so slots is non-empty before we toggle. Otherwise
     // toggleMultiNook treats this as an empty entry and reloads the stored
     // lineup, dropping the channel we just added.
-    await mn.addSlot(login);
+    await mn.addSlot(login, provider);
 
     // Focus MultiNook chat on the channel we came from. The chat hook keys on
     // the active channel's login, so keeping it on this same channel means the
@@ -2619,7 +2623,16 @@ const VideoPlayer = () => {
                   live ring is gated on media type — this overlay also serves
                   VODs, clips, and offline chat, where it would be a lie. */}
               <div className="flex items-center gap-2 min-w-0">
-                {currentStream.profile_image_url ? (
+                {streamProvider(currentStream) === 'itzon' ? (
+                  <ItzonAvatar
+                    src={currentStream.profile_image_url}
+                    name={currentStream.user_name || currentStream.user_login}
+                    draggable={false}
+                    className={`w-7 h-7 rounded-full object-cover shrink-0 ${
+                      currentMediaType === 'live' ? 'ring-2 ring-live/80' : ''
+                    }`}
+                  />
+                ) : currentStream.profile_image_url ? (
                   <img
                     src={currentStream.profile_image_url}
                     alt=""

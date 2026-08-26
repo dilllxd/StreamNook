@@ -260,10 +260,40 @@ interface ProviderChannelMeta {
 // The backend command that returns a provider's channel metadata, or null if the
 // provider exposes none.
 function metaCommandFor(provider?: ProviderId): string | null {
+  if (provider === 'itzon') return 'provider_channel_meta';
   if (provider === 'kick') return 'get_kick_channel_meta';
   if (provider === 'youtube') return 'get_youtube_channel_meta';
   if (provider === 'tiktok') return 'get_tiktok_channel_meta';
   return null;
+}
+
+async function fetchProviderMeta(
+  provider: ProviderId | undefined,
+  slug: string,
+): Promise<ProviderChannelMeta | null> {
+  const command = metaCommandFor(provider);
+  if (!command) return null;
+  if (provider === 'itzon') {
+    const stream = await invoke<{
+      user_id?: string;
+      user_name?: string;
+      viewer_count?: number;
+      started_at?: string;
+      title?: string;
+      profile_image_url?: string | null;
+      is_live?: boolean;
+    }>(command, { provider, channel: slug });
+    return {
+      user_id: stream.user_id,
+      username: stream.user_name,
+      viewer_count: stream.viewer_count,
+      start_time: stream.started_at,
+      title: stream.title,
+      profile_pic: stream.profile_image_url,
+      is_live: stream.is_live ?? false,
+    };
+  }
+  return invoke<ProviderChannelMeta | null>(command, { slug });
 }
 
 // Non-Twitch sources render through the SAME ChatWidget for full parity (emotes,
@@ -281,12 +311,12 @@ function ProviderViaChatWidget({ channel, channelId, channelName, provider, isAc
   const fetchMeta = useCallback(async () => {
     if (!metaCommand) return; // provider exposes no channel metadata
     try {
-      const m = await invoke<ProviderChannelMeta | null>(metaCommand, { slug });
+      const m = await fetchProviderMeta(provider, slug);
       if (m) setMeta(m);
     } catch (err) {
       Logger.warn(`[MultiChatPane] ${metaCommand} failed:`, err);
     }
-  }, [slug, metaCommand]);
+  }, [provider, slug, metaCommand]);
   // The pane mounts before the (multi-second) resolve caches the meta — Kick clears
   // Cloudflare in a hidden webview, YouTube fetches + parses the watch page — so
   // poll FAST until it lands, otherwise the name / viewers / uptime wouldn't appear
@@ -300,7 +330,7 @@ function ProviderViaChatWidget({ channel, channelId, channelName, provider, isAc
     let attempts = 0;
     const tick = async () => {
       if (cancelled) return;
-      const m = await invoke<ProviderChannelMeta | null>(metaCommand, { slug }).catch(() => null);
+      const m = await fetchProviderMeta(provider, slug).catch(() => null);
       if (cancelled) return;
       if (m) {
         setMeta(m);
@@ -313,7 +343,7 @@ function ProviderViaChatWidget({ channel, channelId, channelName, provider, isAc
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [metaCommand, slug, meta]);
+  }, [provider, metaCommand, slug, meta]);
   useVisibleInterval(fetchMeta, STREAM_POLL_INTERVAL_MS);
 
   // Normalize the tab/source label to the resolved display name (e.g. a YouTube

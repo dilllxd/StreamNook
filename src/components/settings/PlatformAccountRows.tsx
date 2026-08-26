@@ -22,7 +22,7 @@ import { Tooltip } from '../ui/Tooltip';
  * "import", "sync", "OAuth" or "session".
  */
 
-const PLATFORMS: PlatformId[] = ['kick', 'youtube'];
+const PLATFORMS: PlatformId[] = ['itzon', 'kick', 'youtube'];
 
 export default function PlatformAccountRows() {
   return (

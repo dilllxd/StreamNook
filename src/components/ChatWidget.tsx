@@ -285,10 +285,27 @@ function formatFollowAge(minutes: number): string {
 }
 
 const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}) => {
+  const isMultiNookActive = usemultiNookStore((s) => s.isMultiNookActive);
+  const activeChatChannelId = usemultiNookStore((s) => s.activeChatChannelId);
+  const slots = usemultiNookStore((s) => s.slots);
+  const activeMultiNookSlot = useMemo(
+    () =>
+      isMultiNookActive && activeChatChannelId
+        ? slots.find(
+            (slot) =>
+              slot.channelId === activeChatChannelId ||
+              slot.channelLogin === activeChatChannelId,
+          )
+        : undefined,
+    [isMultiNookActive, activeChatChannelId, slots],
+  );
   // Single source of truth for the source platform. Twitch (the default) runs the
   // entire native path below unchanged; a non-twitch provider reads the shared
   // `provider:channel` slice and every Twitch-only effect early-returns on it.
-  const provider: ProviderId = channelOverride?.provider ?? 'twitch';
+  const provider: ProviderId =
+    channelOverride?.provider ?? activeMultiNookSlot?.provider ?? 'twitch';
+  const providerChannel =
+    (channelOverride?.user_login ?? activeMultiNookSlot?.channelLogin)?.toLowerCase();
   const isTwitch = provider === 'twitch';
   // The main window, whether watching Twitch (no override) or a provider stream
   // (override tagged `context: 'main'`). MultiChat popouts are the other case.
@@ -301,7 +318,7 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
   // Twitch-only actions (connect is a no-op; send is read-only until OAuth).
   const twitchChat = useTwitchChat();
   const providerKey =
-    !isTwitch && channelOverride ? makeKey(provider, channelOverride.user_login.toLowerCase()) : null;
+    !isTwitch && providerChannel ? makeKey(provider, providerChannel) : null;
   const providerSnapshot = useChannelChat(providerKey);
   // Hoisted out of the memo below so their identities survive a flush. The memo
   // now recomputes on every renderToken bump, so functions declared inline in it
@@ -315,7 +332,7 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
       replyParentMsgId?: string,
       _senderAccount?: unknown,
     ) => {
-      if (!channelOverride) return;
+      if (!providerChannel) return;
       let text = messageText;
       let replyTo = replyParentMsgId ?? null;
       // YouTube live chat has no reply threads, so a reply becomes the @mention
@@ -335,7 +352,7 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
         drop_reason: string | null;
       }>('provider_send_message', {
         provider,
-        channel: channelOverride.user_login.toLowerCase(),
+        channel: providerChannel,
         text,
         replyTo,
       });
@@ -346,8 +363,7 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
         throw new Error(outcome.drop_reason || 'Message not sent');
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [provider, channelOverride, providerSnapshot.messages],
+    [provider, providerChannel, providerSnapshot.messages],
   );
   const providerSetPaused = useCallback(
     (paused: boolean) => {
@@ -377,7 +393,6 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
     // Depend on the individual fields, NOT on `providerSnapshot` itself:
     // useChannelChat returns a fresh object every render, so a dep on the
     // snapshot meant this memo never held and re-ran on every keystroke.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       providerSnapshot.messages,
       providerSnapshot.isConnected,
@@ -426,6 +441,7 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
   // used to be a 5s `kick_is_connected` poll PER PANE, reading a pure in-memory
   // bool that only ever changes when the user connects or disconnects.
   const kickConnected = usePlatformAccountStore((s) => provider === 'kick' && s.kick.connected);
+  const itzonConnected = usePlatformAccountStore((s) => provider === 'itzon' && s.itzon.connected);
   // The connected Kick account's username, lowercased — used to spot our OWN
   // (badged) messages so we can tell whether we may moderate this Kick channel
   // (Kick gives no Twitch-style USERSTATE with our role).
@@ -444,7 +460,7 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
   // succeeding. Visibility-gated now, so a backgrounded window stops asking; the
   // backend also rate-limits a failing probe to once a minute.
   const [youtubeCanModerate, setYoutubeCanModerate] = useState(false);
-  const youtubeSlug = channelOverride?.user_login;
+  const youtubeSlug = provider === 'youtube' ? providerChannel : undefined;
   const canModerateActive = provider === 'youtube' && youtubeConnected && !!youtubeSlug;
   useEffect(() => {
     if (canModerateActive) return;
@@ -480,7 +496,7 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
     subscribed_for: number;
   } | null>(null);
   const kickCanModerate = kickViewer ? kickViewer.can_moderate : null;
-  const kickSlug = provider === 'kick' ? channelOverride?.user_login?.toLowerCase() : undefined;
+  const kickSlug = provider === 'kick' ? providerChannel?.toLowerCase() : undefined;
   const kickModActive = provider === 'kick' && kickConnected && !!kickSlug;
   useEffect(() => {
     if (kickModActive) return;
@@ -513,10 +529,6 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
   // and level-up logic below all work per-pane with no further changes.
   const currentHypeTrain = channelOverride ? (hypeTrainOverride ?? null) : globalHypeTrain;
   const currentMediaType = useAppStore((s) => s.currentMediaType);
-  const isMultiNookActive = usemultiNookStore((s) => s.isMultiNookActive);
-  const activeChatChannelId = usemultiNookStore((s) => s.activeChatChannelId);
-  const slots = usemultiNookStore((s) => s.slots);
-
   const currentStream = useMemo(() => {
     // Popout (StreamNook MultiChat) channel takes priority. Synthesizes a
     // TwitchStream from caller-supplied metadata; the popout polls Helix for
@@ -546,29 +558,27 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
         is_mature: false,
       } as TwitchStream;
     }
-    if (isMultiNookActive && activeChatChannelId) {
-      const activeSlot = slots.find(s => s.channelId === activeChatChannelId || s.channelLogin === activeChatChannelId);
-      if (activeSlot) {
-        return {
-          id: activeSlot.channelId || activeSlot.id,
-          user_id: activeSlot.channelId || '',
-          user_login: activeSlot.channelLogin,
-          user_name: activeSlot.channelName || activeSlot.channelLogin,
-          game_id: '',
-          game_name: 'multi-nook',
-          type: 'live',
-          title: `multi-nook: ${activeSlot.channelName || activeSlot.channelLogin}`,
-          viewer_count: 0,
-          started_at: new Date().toISOString(),
-          language: 'en',
-          thumbnail_url: '',
-          tag_ids: [],
-          is_mature: false
-        } as TwitchStream;
-      }
+    if (activeMultiNookSlot) {
+      return {
+        id: activeMultiNookSlot.channelId || activeMultiNookSlot.id,
+        user_id: activeMultiNookSlot.channelId || '',
+        user_login: activeMultiNookSlot.channelLogin,
+        user_name: activeMultiNookSlot.channelName || activeMultiNookSlot.channelLogin,
+        game_id: '',
+        game_name: 'multi-nook',
+        type: 'live',
+        title: `multi-nook: ${activeMultiNookSlot.channelName || activeMultiNookSlot.channelLogin}`,
+        viewer_count: 0,
+        started_at: new Date().toISOString(),
+        language: 'en',
+        thumbnail_url: '',
+        provider: activeMultiNookSlot.provider,
+        tag_ids: [],
+        is_mature: false,
+      } as TwitchStream;
     }
     return rawCurrentStream;
-  }, [channelOverride, rawCurrentStream, isMultiNookActive, activeChatChannelId, slots]);
+  }, [channelOverride, rawCurrentStream, activeMultiNookSlot]);
 
   // Kick has no USERSTATE, so derive our role from our OWN messages: if one of
   // them (matched by the connected Kick username) carries a moderator/broadcaster
@@ -620,7 +630,7 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
     setCachedMod(isCachedModerator(currentStream?.user_id));
   }, [currentStream?.user_id]);
   useEffect(() => {
-    // Twitch only: a Kick/YouTube provider snapshot must never write its channel
+    // Twitch only: a provider snapshot must never write its channel
     // id into the Twitch mod-room cache (the id namespaces collide).
     if (!isTwitch) return;
     const id = currentStream?.user_id;
@@ -628,7 +638,7 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
     setCachedModerator(id, isModerator);
     setCachedMod(isModerator);
   }, [isTwitch, isModerator, userBadges, currentStream?.user_id]);
-  // Mod rooms are Twitch-only: without the isTwitch gate, a Kick/YouTube
+  // Mod rooms are Twitch-only: without the isTwitch gate, a provider
   // moderator in an override pane would get a Mods toggle whose channel id
   // belongs to the wrong platform.
   const modRoomEligible = isTwitch && (isModerator || cachedMod);
@@ -1218,7 +1228,10 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
   const isReplayReadOnly = isVodReplay && chatMode === 'replay';
   const canSendHere =
     !isReplayReadOnly &&
-    (isTwitch || (provider === 'kick' && kickConnected) || (provider === 'youtube' && youtubeConnected));
+    (isTwitch ||
+      (provider === 'itzon' && itzonConnected) ||
+      (provider === 'kick' && kickConnected) ||
+      (provider === 'youtube' && youtubeConnected));
   // Sub-only gating is Twitch-only. On a provider we know the room mode but not
   // reliably whether YOU are exempt (the subscription list is an imported
   // snapshot that goes stale), and locking out a real subscriber is worse than
@@ -1233,7 +1246,6 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
   // is followers-only describes a restriction they already satisfy, which is
   // noise rather than information — the point of the row is "here is why your
   // message may not send", not an inventory of the channel's settings.
-  const providerChannel = channelOverride?.user_login?.toLowerCase();
   const followsThis = useFollowsStore((s) =>
     !isTwitch && providerChannel ? s.isFollowed(provider, providerChannel) : false,
   );
@@ -1267,7 +1279,9 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
   const chatPlaceholder = isReplayReadOnly
     ? 'Viewing chat replay (read-only)'
     : !canSendHere
-    ? provider === 'kick'
+    ? provider === 'itzon'
+      ? 'Connect your itzon account to send'
+      : provider === 'kick'
       ? 'Connect your Kick account to send'
       : provider === 'youtube'
       ? 'Connect your YouTube account to send'
@@ -1501,7 +1515,7 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
     // Twitch never echoes your own PRIVMSG back, so nothing else ever adds you to
     // the chat-user store. Kick's Pusher room broadcasts your own message like
     // anyone else's, and YouTube's send publishes the rendered item immediately
-    // (and the read loop echoes it again), so on both platforms your own message
+    // (and the read loop echoes it again), so your own message
     // arrives as a normal incoming message and seeds your cosmetics for free.
     // Seeding here for a provider would also key off the TWITCH user id, which is
     // the wrong identity entirely.
@@ -2727,7 +2741,7 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
   // the user opts in. Single char, takes no visual space in chat.
   const DUPLICATE_BYPASS_SUFFIX = ' \u{E0000}';
 
-  // Slash commands on a Kick/YouTube channel. The Twitch handler is Helix, GQL
+  // Slash commands on a provider channel. The Twitch handler is Helix, GQL
   // and raw IRC end to end, so nothing here may fall through to it. Moderation
   // verbs map onto the provider's own commands; everything else says so out
   // loud rather than silently doing nothing (or worse, hitting Twitch).
@@ -2865,7 +2879,7 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
 
   const handleSendMessage = async (opts?: { keepInput?: boolean }) => {
     // Twitch sends need the Twitch account; a provider send needs only that
-    // platform's own connection, so a Kick/YouTube user with no Twitch login
+    // platform's own connection, so a provider user with no Twitch login
     // can still talk.
     const senderReady = isTwitch ? !!currentUser : canSendHere;
     if ((messageInput.trim() || isWatchStreakMode || isResubMode) && isConnected && senderReady) {
@@ -3008,7 +3022,7 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
         }
 
         // Provider slash commands never reach the Twitch handler below: every
-        // command in it is Helix/GQL or raw IRC, so a Kick/YouTube channel id
+        // command in it is Helix/GQL or raw IRC, so a provider channel id
         // would be sent to Twitch's API for a completely unrelated channel.
         if (messageToSend.startsWith('/') && !isTwitch) {
           await handleProviderSlashCommand(messageToSend);
@@ -4111,6 +4125,7 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
                                   channel: s.channelLogin,
                                   channelId: s.channelId ?? null,
                                   channelName: s.channelName ?? s.channelLogin,
+                                  provider: s.provider ?? 'twitch',
                                 })),
                               });
                               // Chat now lives in the popout — hide the in-grid chat panel to
@@ -4122,6 +4137,7 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
                                 channel: currentStream.user_login,
                                 channelId: currentStream.user_id || undefined,
                                 channelName: currentStream.user_name || undefined,
+                                provider: streamProvider(currentStream),
                               });
                             }
                           } catch (err) {
@@ -5001,6 +5017,15 @@ const ChatWidget = ({ channelOverride, hypeTrainOverride }: ChatWidgetProps = {}
                 <PlatformAccountChip
                   connected={kickConnected}
                   onConnect={() => void connectPlatformAccount('kick')}
+                />
+              </div>
+            )}
+            {isMainSurface && provider === 'itzon' && !itzonConnected && (
+              <div className="mt-2 flex justify-end">
+                <PlatformAccountChip
+                  provider="itzon"
+                  connected={itzonConnected}
+                  onConnect={() => void connectPlatformAccount('itzon')}
                 />
               </div>
             )}

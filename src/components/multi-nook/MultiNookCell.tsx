@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { MultiNookSlot } from '../../types';
 import { useMultiNookPlayer } from './useMultiNookPlayer';
 import { usemultiNookStore } from '../../stores/multiNookStore';
+import { buildProviderUrl } from '../../utils/streamProvider';
 import { useAppStore } from '../../stores/AppStore';
 import { useChannelSocial } from '../../hooks/useChannelSocial';
 import {
@@ -24,6 +25,7 @@ import { TwitchVerifiedMark } from '../ui/TwitchGlyph';
 import { GripHorizontal, Undo2, Loader2, RefreshCcw, EyeOff, WifiOff, Maximize2, Minimize2 } from 'lucide-react';
 import { Heart, HeartBreak, X as XIcon } from 'phosphor-react';
 import { Logger } from '../../utils/logger';
+import { ItzonAvatar } from '../ItzonAvatar';
 
 interface MultiNookCellProps {
   slot: MultiNookSlot;
@@ -48,6 +50,7 @@ const clearPendingFocusToggle = () => {
 
 const MultiNookCellInner: React.FC<MultiNookCellProps> = ({ slot, cssOrder, gridSpanClass = '', customStyle = {}, isMaximized = false }) => {
   const { id, channelLogin, channelName, channelId, volume, muted, isFocused, streamUrl, isMinimized = false, loadError, profileImageUrl, title, broadcasterType } = slot;
+  const provider = slot.provider ?? 'twitch';
   // Actions only, so read them without subscribing. A bare `usemultiNookStore()`
   // here subscribed this tile to the WHOLE store, which meant any mutation
   // (including a volume drag on a sibling tile) re-rendered every tile in the
@@ -78,7 +81,8 @@ const MultiNookCellInner: React.FC<MultiNookCellProps> = ({ slot, cssOrder, grid
   // hook so we make one follow/subscription lookup at a time instead of one per
   // tile across the whole grid. Visibility additionally honors the same
   // Player Overlay Buttons setting as the single-stream player.
-  const socialEnabled = isFocused && !isMinimized;
+  const controlsEnabled = isFocused && !isMinimized;
+  const socialEnabled = controlsEnabled && provider === 'twitch';
   const playerOverlayButtons = useAppStore((s) => s.settings.player_overlay_buttons);
   const {
     isFollowing,
@@ -105,9 +109,9 @@ const MultiNookCellInner: React.FC<MultiNookCellProps> = ({ slot, cssOrder, grid
   // Available stream qualities for the focused tile's gear menu
   const [availableQualities, setAvailableQualities] = useState<string[]>([]);
   useEffect(() => {
-    if (!socialEnabled) return;
+    if (!controlsEnabled) return;
     let cancelled = false;
-    invoke<string[]>('get_stream_qualities', { url: `https://twitch.tv/${channelLogin}` })
+    invoke<string[]>('get_stream_qualities', { url: buildProviderUrl(provider, channelLogin) })
       .then((qs) => {
         if (!cancelled && qs?.length) setAvailableQualities(qs);
       })
@@ -115,7 +119,7 @@ const MultiNookCellInner: React.FC<MultiNookCellProps> = ({ slot, cssOrder, grid
     return () => {
       cancelled = true;
     };
-  }, [socialEnabled, channelLogin]);
+  }, [controlsEnabled, provider, channelLogin]);
 
   // Inject a Quality submenu into this tile's Plyr settings gear — mirrors the
   // single player. Selecting a quality restarts only this tile's proxy via
@@ -221,7 +225,7 @@ const MultiNookCellInner: React.FC<MultiNookCellProps> = ({ slot, cssOrder, grid
     if (!container) return;
 
     let timer: number | undefined;
-    if (socialEnabled && availableQualities.length > 0) {
+    if (controlsEnabled && availableQualities.length > 0) {
       // Defer so Plyr has finished rendering its menu DOM
       timer = window.setTimeout(() => updateQualityMenu(), 200);
     } else {
@@ -233,7 +237,7 @@ const MultiNookCellInner: React.FC<MultiNookCellProps> = ({ slot, cssOrder, grid
       if (timer) window.clearTimeout(timer);
     };
     // isPlaying/streamUrl re-trigger after the player (re)initialises
-  }, [socialEnabled, availableQualities, updateQualityMenu, isPlaying, streamUrl, playerRef]);
+  }, [controlsEnabled, availableQualities, updateQualityMenu, isPlaying, streamUrl, playerRef]);
 
   const {
     attributes,
@@ -479,7 +483,14 @@ const MultiNookCellInner: React.FC<MultiNookCellProps> = ({ slot, cssOrder, grid
             {/* Sized to match the full player's identity row. No live ring on the
                 avatar though — a tile can be offline. */}
             <div className="flex items-center gap-2 min-w-0 mt-1">
-              {profileImageUrl ? (
+              {provider === 'itzon' ? (
+                <ItzonAvatar
+                  src={profileImageUrl}
+                  name={channelName || channelLogin}
+                  draggable={false}
+                  className="w-7 h-7 rounded-full object-cover shrink-0 bg-black/20"
+                />
+              ) : profileImageUrl ? (
                 <img
                   src={profileImageUrl}
                   alt=""
@@ -501,7 +512,7 @@ const MultiNookCellInner: React.FC<MultiNookCellProps> = ({ slot, cssOrder, grid
                   {channelName || channelLogin}
                 </h3>
               </Tooltip>
-              {broadcasterType === 'partner' && (
+              {provider === 'twitch' && broadcasterType === 'partner' && (
                 <TwitchVerifiedMark size={14} className="text-[#9146FF] shrink-0" />
               )}
               {isFocused && (

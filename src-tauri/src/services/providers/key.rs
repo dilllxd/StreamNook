@@ -5,7 +5,7 @@
 //! recognised provider prefix is treated as a legacy Twitch login, so older
 //! persisted state and the existing Twitch code paths keep working unchanged.
 
-pub const PROVIDER_IDS: [&str; 6] = ["twitch", "kick", "youtube", "rumble", "tiktok", "x"];
+pub const PROVIDER_IDS: [&str; 7] = ["twitch", "itzon", "kick", "youtube", "rumble", "tiktok", "x"];
 pub const DEFAULT_PROVIDER: &str = "twitch";
 
 pub fn is_provider_id(s: &str) -> bool {

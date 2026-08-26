@@ -76,6 +76,8 @@ export function streamThumbnail(stream: Pick<TwitchStream, 'thumbnail_url'>, wid
  */
 export function buildProviderUrl(provider: ProviderId, channel: string): string {
   switch (provider) {
+    case 'itzon':
+      return `https://itzon.tv/${encodeURIComponent(channel)}`;
     case 'kick':
       return `https://kick.com/${encodeURIComponent(channel)}`;
     case 'youtube':

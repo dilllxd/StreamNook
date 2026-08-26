@@ -224,7 +224,6 @@ mod commands;
 mod models;
 mod plugin_host;
 mod services;
-mod utils;
 
 /// Load settings from the custom location in the same directory as cache
 fn load_settings_from_file() -> Result<Settings, Box<dyn std::error::Error>> {
@@ -882,6 +881,10 @@ fn main() {
             restart_chat_bridge,
             validate_platform_sessions,
             platform_account_info,
+            itzon_connect,
+            itzon_disconnect,
+            itzon_is_connected,
+            itzon_restore_session,
             get_youtube_channel_emojis,
             commands::streaming::youtube_sabr_probe,
             get_chat_lifecycle_log,
@@ -940,6 +943,7 @@ fn main() {
             kick_chat_history,
             kick_viewer_state,
             get_kick_channel_emotes,
+            get_itzon_channel_emotes,
             get_youtube_channel_emotes,
             load_mod_logs,
             append_mod_log,

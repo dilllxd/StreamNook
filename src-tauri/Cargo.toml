@@ -1,10 +1,10 @@
 [package]
 name = "StreamNook"
-version = "8.5.1"
-description = "StreamNook"
+version = "8.5.1-itzon.1"
+description = "StreamNook with Twitch, Itzon, Kick, and YouTube support"
 authors = ["Brandon Winters"]
 license = "PolyForm-Noncommercial-1.0.0"
-repository = "github.com/winters27/streamnook"
+repository = "https://github.com/dilllxd/StreamNook"
 edition = "2021"
 
 [[bin]]

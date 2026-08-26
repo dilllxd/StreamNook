@@ -4,9 +4,9 @@
 // release phase via the `enabled` flag below. A "source" the user watches is
 // identified by a composite `<provider>:<channel>` key (see utils/providerKey).
 
-export type ProviderId = 'twitch' | 'kick' | 'youtube' | 'rumble' | 'tiktok' | 'x';
+export type ProviderId = 'twitch' | 'itzon' | 'kick' | 'youtube' | 'rumble' | 'tiktok' | 'x';
 
-export const PROVIDER_IDS: ProviderId[] = ['twitch', 'kick', 'youtube', 'rumble', 'tiktok', 'x'];
+export const PROVIDER_IDS: ProviderId[] = ['twitch', 'itzon', 'kick', 'youtube', 'rumble', 'tiktok', 'x'];
 
 export const DEFAULT_PROVIDER: ProviderId = 'twitch';
 
@@ -33,6 +33,7 @@ export interface ProviderMeta {
 
 export const PROVIDERS: Record<ProviderId, ProviderMeta> = {
   twitch: { id: 'twitch', label: 'Twitch', chatEnabled: true, send: 'native', readNeedsWebview: false, color: '#9147ff' },
+  itzon: { id: 'itzon', label: 'itzon', chatEnabled: true, send: 'oauth', readNeedsWebview: false, color: '#4ade80' },
   kick: { id: 'kick', label: 'Kick', chatEnabled: true, send: 'oauth', readNeedsWebview: false, color: '#53fc18' },
   youtube: { id: 'youtube', label: 'YouTube', chatEnabled: true, send: 'webview', readNeedsWebview: false, color: '#ff0000' },
   rumble: { id: 'rumble', label: 'Rumble', chatEnabled: false, send: 'webview', readNeedsWebview: false, color: '#85c742' },
@@ -70,6 +71,7 @@ export interface ProviderWatchMeta {
 
 export const PROVIDER_WATCH: Record<ProviderId, ProviderWatchMeta> = {
   twitch: { playback: true, browse: 'categories', search: true, followedLive: 'native', liveCheck: true },
+  itzon: { playback: true, browse: 'categories', search: true, followedLive: 'native', liveCheck: true },
   kick: { playback: true, browse: 'categories', search: true, followedLive: 'inApp', liveCheck: true },
   // native when a YouTube session exists (subscriptions), inApp otherwise.
   // browse is 'categories' off YouTube's OWN games directory (/gaming/games), not

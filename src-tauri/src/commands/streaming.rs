@@ -331,6 +331,17 @@ async fn start_provider_stream(
             let port = StreamServer::start_proxy_server(resolved.url)
                 .await
                 .map_err(|e| e.to_string())?;
+            if provider == "itzon" {
+                if let Some(playback) =
+                    crate::services::providers::itzon_media::take_resolved_playback(channel).await
+                {
+                    crate::services::providers::itzon_media::start_heartbeat(
+                        crate::services::stream_server::SOLO_STREAM_ID,
+                        &playback,
+                    )
+                    .await;
+                }
+            }
             Ok(StreamStartResult {
                 url: local_player_url(port),
                 quality: resolved.quality,
@@ -425,6 +436,10 @@ pub async fn start_stream(
     // Clear the prior solo session up front; only a live resolve below
     // re-registers it (keeps a stale session off clip/VOD playback).
     crate::services::stream_server::set_solo_session(None);
+    crate::services::providers::itzon_media::stop_heartbeat(
+        crate::services::stream_server::SOLO_STREAM_ID,
+    )
+    .await;
 
     // Non-Twitch platform → its own StreamSource adapter. Dispatching on the URL
     // keeps this the single playback entry point, so quality changes, restarts
@@ -541,6 +556,10 @@ pub async fn start_stream(
 
 #[tauri::command]
 pub async fn stop_stream() -> Result<(), String> {
+    crate::services::providers::itzon_media::stop_heartbeat(
+        crate::services::stream_server::SOLO_STREAM_ID,
+    )
+    .await;
     StreamServer::stop().await.map_err(|e| e.to_string())
 }
 

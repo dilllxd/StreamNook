@@ -1,3 +1,10 @@
+## [8.5.1-itzon.1] - 2026-08-26
+
+- Rebased the Itzon integration onto StreamNook 8.5.1 and its shared provider architecture.
+- Added Itzon browsing, follows, playback, chat, emotes, MultiChat, MultiNook, overlays, account login, and platform-native branding.
+- Switched Twitch login, linked accounts, and mod-room consent to public-client device authorization so fork builds do not embed a Twitch client secret.
+- Added a Windows preview build and release workflow for the fork.
+
 ## [8.5.1] - 2026-08-25
 
 ## 🎉 New: A smarter Discover feed

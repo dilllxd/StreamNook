@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 
 /**
- * Thin wrappers over the Kick / YouTube account commands, mirroring
+ * Thin wrappers over the Itzon, Kick, and YouTube account commands, mirroring
  * `accountService.ts`'s role for Twitch.
  *
  * Before this existed, every one of these was a raw `invoke` written out at the
@@ -12,10 +12,22 @@ import { invoke } from '@tauri-apps/api/core';
 
 /** Platforms with an account you can connect. Twitch is not one of these: it is
  *  the app's native account and lives in `accountService`. */
-export type PlatformId = 'kick' | 'youtube';
+export type PlatformId = 'itzon' | 'kick' | 'youtube';
+
+const CONNECTION_COMMANDS: Record<PlatformId, string> = {
+  itzon: 'itzon_restore_session',
+  kick: 'kick_is_connected',
+  youtube: 'youtube_is_connected',
+};
+
+const DISCONNECT_COMMANDS: Record<PlatformId, string> = {
+  itzon: 'itzon_disconnect',
+  kick: 'kick_disconnect',
+  youtube: 'youtube_disconnect',
+};
 
 export function isConnected(provider: PlatformId): Promise<boolean> {
-  return invoke<boolean>(provider === 'kick' ? 'kick_is_connected' : 'youtube_is_connected');
+  return invoke<boolean>(CONNECTION_COMMANDS[provider]);
 }
 
 export interface PlatformAccountInfo {
@@ -35,7 +47,11 @@ export function accountInfo(provider: PlatformId): Promise<PlatformAccountInfo> 
 }
 
 export function disconnect(provider: PlatformId): Promise<void> {
-  return invoke<void>(provider === 'kick' ? 'kick_disconnect' : 'youtube_disconnect');
+  return invoke<void>(DISCONNECT_COMMANDS[provider]);
+}
+
+export function beginItzonSession(): Promise<void> {
+  return invoke<void>('itzon_connect');
 }
 
 /**

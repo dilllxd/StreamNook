@@ -67,7 +67,9 @@ jobs:
         shell: pwsh
         run: |
           npm run build
-          npx tsx --test "src/**/*.test.ts"
+          $tests = Get-ChildItem src -Recurse -Filter '*.test.ts' | Select-Object -ExpandProperty FullName
+          if (-not $tests) { throw 'No frontend tests found' }
+          npm run test:frontend -- $tests
 
       - name: Test Rust
         run: cargo test --manifest-path src-tauri/Cargo.toml

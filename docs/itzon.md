@@ -36,7 +36,8 @@ exact variable names. Do not commit client secrets.
 ```powershell
 npm ci
 npm run build
-npx tsx --test "src/**/*.test.ts"
+$tests = Get-ChildItem src -Recurse -Filter '*.test.ts' | Select-Object -ExpandProperty FullName
+npm run test:frontend -- $tests
 cargo test --manifest-path src-tauri/Cargo.toml
 npm run tauri build -- --no-bundle
 ```
